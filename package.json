@@ -1,0 +1,17 @@
+{
+  "name": "pesquisa-whats-api",
+  "version": "2.0.0",
+  "description": "WhatsApp Chatbot Studio - Full-stack Node.js (TypeScript) & React",
+  "scripts": {
+    "dev:backend": "npm run --prefix backend dev",
+    "dev:frontend": "npm run --prefix frontend dev",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,green\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build:backend": "npm run --prefix backend build",
+    "build:frontend": "npm run --prefix frontend build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start": "npm run --prefix backend start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
