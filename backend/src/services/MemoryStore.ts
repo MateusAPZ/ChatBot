@@ -467,6 +467,36 @@ export class MemoryStore {
       conversas: conversasResumo
     };
   }
+
+  obterHistoricoConversa(conversaId: number) {
+    const c = this.conversas.find(x => x.id === conversaId);
+    if (!c) return null;
+    const msgs = this.historico
+      .filter(h => h.conversaId === conversaId)
+      .map(m => {
+        const d = new Date(m.data);
+        const dataStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        return {
+          direcao: m.direcao,
+          conteudo: m.conteudo,
+          data: dataStr
+        };
+      });
+    return {
+      protocolo: c.protocolo,
+      telefone: c.telefone,
+      contato: c.nomeContato,
+      mensagens: msgs
+    };
+  }
+
+  encerrarConversa(conversaId: number): boolean {
+    const c = this.conversas.find(x => x.id === conversaId);
+    if (!c) return false;
+    c.finalizada = true;
+    c.fluxoMensagemAtualId = null;
+    return true;
+  }
 }
 
 export const memoryStore = new MemoryStore();

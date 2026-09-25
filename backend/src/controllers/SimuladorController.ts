@@ -5,10 +5,24 @@ import { chatbotService } from '../services/ChatbotService';
 export class SimuladorController {
   async obterFluxos(req: Request, res: Response) {
     try {
-      const fluxosRes = await pool.query('SELECT "Id" as id, "Nome" as nome, "EhPadrao" as "ehPadrao" FROM "Fluxos" WHERE "Status" = true ORDER BY "Nome" ASC');
-      const padrao = fluxosRes.rows.find(f => f.ehPadrao)?.id || fluxosRes.rows[0]?.id || null;
-      return res.json({ sucesso: true, fluxos: fluxosRes.rows, fluxoSelecionado: padrao });
+      const todos = await chatbotService.listarFluxos();
+      // Prioriza os ativos; se não houver nenhum ativo, exibe todos para permitir teste
+      const ativos = todos.filter(f => f.status);
+      const lista = ativos.length > 0 ? ativos : todos;
+
+      const fluxos = lista
+        .map(f => ({
+          id: f.id,
+          nome: f.nome,
+          ehPadrao: f.ehPadrao,
+          status: f.status
+        }))
+        .sort((a, b) => (b.ehPadrao ? 1 : 0) - (a.ehPadrao ? 1 : 0) || a.nome.localeCompare(b.nome));
+
+      const padrao = fluxos.find(f => f.ehPadrao)?.id || fluxos[0]?.id || null;
+      return res.json({ sucesso: true, fluxos, fluxoSelecionado: padrao });
     } catch (err: any) {
+      console.error('Erro ao obter fluxos para o simulador:', err);
       return res.status(500).json({ sucesso: false, erro: err.message });
     }
   }

@@ -37,14 +37,32 @@ export const SimulatorPage: React.FC = () => {
     async function carregar() {
       try {
         const data = await apiService.getSimuladorFluxos();
-        setFluxos(data.fluxos);
+        const lista = data.fluxos || [];
+        setFluxos(lista);
         if (fluxoParam) {
           setFluxoSelecionado(parseInt(fluxoParam, 10));
         } else if (data.fluxoSelecionado) {
           setFluxoSelecionado(data.fluxoSelecionado);
+        } else if (lista.length > 0) {
+          const padrao = lista.find(f => f.ehPadrao) || lista[0];
+          setFluxoSelecionado(padrao.id);
         }
       } catch {
-        toast('Erro ao carregar fluxos para o simulador.', 'erro');
+        // Fallback resiliente: busca da lista geral de fluxos
+        try {
+          const todos = await apiService.getFluxos();
+          const ativos = todos.filter(f => f.status);
+          const lista = ativos.length > 0 ? ativos : todos;
+          setFluxos(lista);
+          if (fluxoParam) {
+            setFluxoSelecionado(parseInt(fluxoParam, 10));
+          } else if (lista.length > 0) {
+            const padrao = lista.find(f => f.ehPadrao) || lista[0];
+            setFluxoSelecionado(padrao.id);
+          }
+        } catch {
+          toast('Erro ao carregar fluxos para o simulador.', 'erro');
+        }
       }
     }
     carregar();

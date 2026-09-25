@@ -127,6 +127,14 @@ export class WhatsAppController {
   async obterHistorico(req: Request, res: Response) {
     try {
       const conversaId = parseInt(String(req.params.id), 10);
+      if (!isDbConnected) {
+        const hist = memoryStore.obterHistoricoConversa(conversaId);
+        if (!hist) {
+          return res.status(404).json({ sucesso: false, erro: 'Conversa não encontrada.' });
+        }
+        return res.json({ sucesso: true, ...hist });
+      }
+
       const convRes = await pool.query('SELECT "Protocolo" as protocolo, "TelefoneUsuario" as telefone, "NomeContato" as contato FROM "Conversas" WHERE "Id" = $1', [conversaId]);
       if (convRes.rowCount === 0) {
         return res.status(404).json({ sucesso: false, erro: 'Conversa não encontrada.' });
@@ -163,6 +171,11 @@ export class WhatsAppController {
   async encerrarConversa(req: Request, res: Response) {
     try {
       const conversaId = parseInt(String(req.params.id), 10);
+      if (!isDbConnected) {
+        memoryStore.encerrarConversa(conversaId);
+        return res.json({ sucesso: true });
+      }
+
       await pool.query('UPDATE "Conversas" SET "Finalizada" = true, "FluxoMensagemAtualId" = NULL WHERE "Id" = $1', [conversaId]);
       return res.json({ sucesso: true });
     } catch (err: any) {
