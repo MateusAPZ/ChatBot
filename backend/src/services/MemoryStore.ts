@@ -1,4 +1,6 @@
 import { Fluxo, FluxoBuilderViewModel, NoBuilder, RespostaBot, ConversaResumo, HistoricoItem } from '../types';
+import { esusService, DadosCidadao } from './EsusService';
+import { verificarCorrespondenciaFuzzy, normalizarEntradaMunicipe } from '../utils/ptBrSpellCorrector';
 
 let nextId = 100;
 
@@ -6,18 +8,48 @@ export class MemoryStore {
   fluxos: { id: number; nome: string; status: boolean; dataCriacao: string; ehPadrao: boolean }[] = [
     {
       id: 1,
-      nome: 'Fluxo de Atendimento Principal',
+      nome: 'PET-Saúde Piraí · Atendimento & Pesquisa SUS',
       status: true,
       dataCriacao: new Date().toISOString(),
       ehPadrao: true
     }
   ];
 
+  cidadaosPorTelefone = new Map<string, DadosCidadao>();
+
   mensagens: Map<number, string> = new Map([
-    [1, 'Olá! 👋 Seja bem-vindo ao Chatbot Studio.\n\nDigite *1* para Suporte\nDigite *2* para Financeiro\nDigite *3* para Encerrar'],
-    [2, 'Você escolheu *Suporte* 🛠️. Em instantes um de nossos especialistas irá te responder.'],
-    [3, 'Você escolheu *Financeiro* 💳. Para consultar boletos ou pagamentos, envie o CPF.'],
-    [4, 'Atendimento finalizado com sucesso. Se precisar de algo mais, basta nos mandar uma mensagem! 👋']
+    [
+      1,
+      'Olá! 👋 Seja bem-vindo ao canal oficial do *PET-Saúde da Prefeitura de Piraí*.\n\nPara consultar sua Unidade de Saúde (USF) ou responder à pesquisa, escolha uma opção ou envie diretamente seu *CPF*:\n\n*1* - 📋 Pesquisa de Atendimento das USFs\n*2* - 📍 Localizar minha Unidade de Saúde\n*3* - 📞 Ouvidoria da Saúde de Piraí\n*4* - 🔍 Consultar cadastro no e-SUS PEC\n*5* - 👨‍💻 Falar com um Atendente Humano'
+    ],
+    [
+      2,
+      '📋 *Pesquisa de Satisfação da Atenção Primária (PET-Saúde Piraí)*\n\nComo você avalia o atendimento e acolhimento recebido na sua Unidade de Saúde da Família?\n\n*1* - Excelente 🌟\n*2* - Bom 👍\n*3* - Regular ⚖️\n*4* - Precisa melhorar ⚠️'
+    ],
+    [
+      3,
+      'Muito obrigado pela sua avaliação! 🙏 Sua resposta foi registrada no sistema municipal e ajuda a qualificar o atendimento do SUS em Piraí.'
+    ],
+    [
+      4,
+      '📍 *Unidades de Saúde da Família (USF) de Piraí*:\n\n• USF Centro: (24) 2411-9300\n• USF Santanésia: (24) 2411-9350\n• USF Arrozal: (24) 2411-9410\n• USF Casa Amarela: (24) 2411-9320\n• USF Varjão: (24) 2411-9380\n\nEnvie seu *CPF* a qualquer momento para localizarmos sua USF e seu Agente Comunitário de Saúde (ACS)!'
+    ],
+    [
+      5,
+      '📞 *Ouvidoria Municipal da Saúde de Piraí*\n\nTelefone direto: *(24) 2411-9328*\nHorário: Segunda a Sexta, das 08h às 17h.\n\nSeu protocolo deste atendimento é: *#{{protocolo}}*.'
+    ],
+    [
+      6,
+      '🔍 Para consultar seu cadastro no *e-SUS PEC Piraí*, por favor, digite o seu *CPF* (apenas números ou com pontos):'
+    ],
+    [
+      7,
+      '✅ *Cadastro e-SUS PEC Localizado com Sucesso!*\n\nOlá, *{{nome}}*!\n📍 **Sua Unidade:** *{{usf}}*\n👩‍⚕️ **Equipe:** *{{equipe}}*\n🩺 **Seu Agente de Saúde (ACS):** *{{acs}}*\n\nComo podemos te ajudar hoje?\n*1* - Responder Pesquisa de Atendimento\n*2* - Ver informações da sua USF\n*3* - Ouvidoria da Saúde\n*4* - Falar com Atendente Humano'
+    ],
+    [
+      8,
+      '👨‍💻 *Atendimento Humano PET-Saúde Piraí*\n\nVocê foi transferido para a nossa equipe de atendimento. O robô foi pausado nesta conversa.\n\nUm atendente responderá em breve por aqui. Aguarde um instante! ⏳\n\n_(Para reativar o robô a qualquer momento, digite *#bot* ou *menu*!)_\n\n[ATENDENTE]'
+    ]
   ]);
 
   nos: {
@@ -30,10 +62,14 @@ export class MemoryStore {
     posY: number;
     proximoId: number | null;
   }[] = [
-    { id: 1, fluxoId: 1, mensagemId: 1, titulo: 'Boas-vindas', ehInicio: true, posX: 120, posY: 160, proximoId: null },
-    { id: 2, fluxoId: 1, mensagemId: 2, titulo: 'Suporte', ehInicio: false, posX: 480, posY: 100, proximoId: null },
-    { id: 3, fluxoId: 1, mensagemId: 3, titulo: 'Financeiro', ehInicio: false, posX: 480, posY: 280, proximoId: null },
-    { id: 4, fluxoId: 1, mensagemId: 4, titulo: 'Encerramento', ehInicio: false, posX: 480, posY: 460, proximoId: null }
+    { id: 1, fluxoId: 1, mensagemId: 1, titulo: 'Boas-vindas Piraí', ehInicio: true, posX: 80, posY: 180, proximoId: null },
+    { id: 2, fluxoId: 1, mensagemId: 2, titulo: 'Pesquisa USF', ehInicio: false, posX: 480, posY: 80, proximoId: null },
+    { id: 3, fluxoId: 1, mensagemId: 3, titulo: 'Agradecimento', ehInicio: false, posX: 880, posY: 80, proximoId: null },
+    { id: 4, fluxoId: 1, mensagemId: 4, titulo: 'Localizar USFs', ehInicio: false, posX: 480, posY: 240, proximoId: null },
+    { id: 5, fluxoId: 1, mensagemId: 5, titulo: 'Ouvidoria Saúde', ehInicio: false, posX: 480, posY: 390, proximoId: null },
+    { id: 6, fluxoId: 1, mensagemId: 6, titulo: 'Pedir CPF e-SUS', ehInicio: false, posX: 480, posY: 540, proximoId: null },
+    { id: 7, fluxoId: 1, mensagemId: 7, titulo: 'Ficha e-SUS PEC', ehInicio: false, posX: 880, posY: 540, proximoId: null },
+    { id: 8, fluxoId: 1, mensagemId: 8, titulo: 'Atendente Humano', ehInicio: false, posX: 480, posY: 690, proximoId: null }
   ];
 
   opcoes: {
@@ -43,22 +79,52 @@ export class MemoryStore {
     destinoId: number;
   }[] = [
     { id: 1, noId: 1, palavraChave: '1', destinoId: 2 },
-    { id: 2, noId: 1, palavraChave: 'suporte', destinoId: 2 },
-    { id: 3, noId: 1, palavraChave: '2', destinoId: 3 },
-    { id: 4, noId: 1, palavraChave: 'financeiro', destinoId: 3 },
-    { id: 5, noId: 1, palavraChave: '3', destinoId: 4 },
-    { id: 6, noId: 1, palavraChave: 'sair', destinoId: 4 }
+    { id: 2, noId: 1, palavraChave: 'pesquisa', destinoId: 2 },
+    { id: 3, noId: 1, palavraChave: '2', destinoId: 4 },
+    { id: 4, noId: 1, palavraChave: 'localizar', destinoId: 4 },
+    { id: 5, noId: 1, palavraChave: '3', destinoId: 5 },
+    { id: 6, noId: 1, palavraChave: 'ouvidoria', destinoId: 5 },
+    { id: 7, noId: 1, palavraChave: '4', destinoId: 6 },
+    { id: 8, noId: 1, palavraChave: 'esus', destinoId: 6 },
+    { id: 9, noId: 1, palavraChave: 'cpf', destinoId: 6 },
+    { id: 21, noId: 1, palavraChave: '5', destinoId: 8 },
+    { id: 22, noId: 1, palavraChave: 'atendente', destinoId: 8 },
+    { id: 23, noId: 1, palavraChave: 'humano', destinoId: 8 },
+    { id: 24, noId: 1, palavraChave: 'falar', destinoId: 8 },
+
+    // Da pesquisa para o agradecimento
+    { id: 10, noId: 2, palavraChave: '1', destinoId: 3 },
+    { id: 11, noId: 2, palavraChave: '2', destinoId: 3 },
+    { id: 12, noId: 2, palavraChave: '3', destinoId: 3 },
+    { id: 13, noId: 2, palavraChave: '4', destinoId: 3 },
+    { id: 14, noId: 2, palavraChave: 'excelente', destinoId: 3 },
+    { id: 15, noId: 2, palavraChave: 'bom', destinoId: 3 },
+    { id: 16, noId: 2, palavraChave: 'regular', destinoId: 3 },
+    { id: 17, noId: 2, palavraChave: 'melhorar', destinoId: 3 },
+
+    // Da ouvidoria para atendente
+    { id: 25, noId: 5, palavraChave: 'atendente', destinoId: 8 },
+    { id: 26, noId: 5, palavraChave: 'humano', destinoId: 8 },
+
+    // Da ficha e-SUS
+    { id: 18, noId: 7, palavraChave: '1', destinoId: 2 },
+    { id: 19, noId: 7, palavraChave: '2', destinoId: 4 },
+    { id: 20, noId: 7, palavraChave: '3', destinoId: 5 },
+    { id: 27, noId: 7, palavraChave: '4', destinoId: 8 },
+    { id: 28, noId: 7, palavraChave: 'atendente', destinoId: 8 }
   ];
 
   conversas: {
     id: number;
     protocolo: string;
     telefone: string;
+    jidOriginal?: string;
     canal: string;
     fluxoId: number | null;
     fluxoMensagemAtualId: number | null;
     nomeContato: string | null;
     finalizada: boolean;
+    emAtendimentoHumano: boolean;
     dataInicio: string;
     dataUltimaInteracao: string;
   }[] = [];
@@ -282,7 +348,7 @@ export class MemoryStore {
   }
 
   // Conversas & Execução
-  iniciarConversa(telefone: string, fluxoId: number, canal: string): RespostaBot {
+  iniciarConversa(telefone: string, fluxoId: number, canal: string, nomeContato?: string, jidOriginal?: string): RespostaBot {
     const noInicial = this.nos.find(n => n.fluxoId === fluxoId && n.ehInicio) || this.nos.find(n => n.fluxoId === fluxoId);
     if (!noInicial) {
       return { sucesso: false, mensagens: ['Este fluxo não possui passos cadastrados.'], opcoes: [] };
@@ -290,17 +356,19 @@ export class MemoryStore {
 
     const protocolo = `${new Date().toISOString().slice(2, 10).replace(/-/g, '')}${Math.floor(1000 + Math.random() * 9000)}`;
 
-    let conv = this.conversas.find(c => c.telefone === telefone && c.canal === canal);
+    let conv = this.conversas.find(c => (c.telefone === telefone || (jidOriginal && c.jidOriginal === jidOriginal)) && c.canal === canal);
     if (!conv) {
       conv = {
         id: ++nextId,
         protocolo,
         telefone,
+        jidOriginal: jidOriginal || telefone,
         canal,
         fluxoId,
         fluxoMensagemAtualId: noInicial.id,
-        nomeContato: null,
+        nomeContato: nomeContato || null,
         finalizada: false,
+        emAtendimentoHumano: false,
         dataInicio: new Date().toISOString(),
         dataUltimaInteracao: new Date().toISOString()
       };
@@ -310,39 +378,81 @@ export class MemoryStore {
       conv.fluxoId = fluxoId;
       conv.fluxoMensagemAtualId = noInicial.id;
       conv.finalizada = false;
+      conv.emAtendimentoHumano = false;
+      if (jidOriginal) conv.jidOriginal = jidOriginal;
+      if (nomeContato) conv.nomeContato = nomeContato;
       conv.dataUltimaInteracao = new Date().toISOString();
     }
 
     return this.percorrerPassos(conv, noInicial.id);
   }
 
-  processarMensagem(telefone: string, texto: string, canal: string): RespostaBot {
+  async processarMensagem(telefone: string, texto: string, canal: string, nomeContato?: string, jidOriginal?: string): Promise<RespostaBot> {
     const entrada = (texto || '').trim().toLowerCase();
-    const conv = this.conversas.find(c => c.telefone === telefone && c.canal === canal);
+    let conv = this.conversas.find(c => (c.telefone === telefone || (jidOriginal && c.jidOriginal === jidOriginal)) && c.canal === canal);
+
+    // Se já estiver em atendimento humano com atendente:
+    if (conv && conv.emAtendimentoHumano) {
+      // Se for comando explícito de reativação pelo próprio munícipe
+      if (['#bot', '#reativar', '/bot', 'bot', 'ligar bot', 'reiniciar', 'menu', 'inicio'].includes(entrada)) {
+        conv.emAtendimentoHumano = false;
+        this.registrarHistorico(conv.id, 'entrada', texto);
+        const volta = this.iniciarConversa(telefone, conv.fluxoId || 1, canal, nomeContato, jidOriginal);
+        volta.mensagens = [
+          '🤖 *Assistente Virtual Reativado!*\n\nO bot voltou a responder automaticamente. Digite uma das opções abaixo:',
+          ...volta.mensagens
+        ];
+        this.registrarHistorico(conv.id, 'saida', '', volta.mensagens);
+        return volta;
+      }
+
+      // Modo Atendente Humano ativo: ROBÔ FICA EM SILÊNCIO ABSOLUTO!
+      // Apenas armazena no histórico para o atendente ler e responder no painel ou WhatsApp.
+      this.registrarHistorico(conv.id, 'entrada', texto);
+      conv.dataUltimaInteracao = new Date().toISOString();
+      return {
+        sucesso: true,
+        mensagens: [], // Nenhuma mensagem automática enviada
+        opcoes: [],
+        emAtendimentoHumano: true,
+        protocolo: conv.protocolo
+      };
+    }
 
     if (!conv || conv.finalizada || !conv.fluxoMensagemAtualId) {
       const padrao = this.fluxos.find(f => f.ehPadrao && f.status) || this.fluxos[0];
       if (!padrao) {
         return { sucesso: false, mensagens: ['Nenhum fluxo padrão ativo.'], opcoes: [] };
       }
-      return this.iniciarConversa(telefone, padrao.id, canal);
+      return this.iniciarConversa(telefone, padrao.id, canal, nomeContato, jidOriginal);
     }
+
+    if (nomeContato && !conv.nomeContato) {
+      conv.nomeContato = nomeContato;
+    }
+    if (jidOriginal && !conv.jidOriginal) {
+      conv.jidOriginal = jidOriginal;
+    }
+
+    this.registrarHistorico(conv.id, 'entrada', texto);
 
     // Comandos globais
     if (['sair', 'encerrar', 'finalizar'].includes(entrada)) {
       conv.finalizada = true;
       conv.dataUltimaInteracao = new Date().toISOString();
-      return {
+      const despedida: RespostaBot = {
         sucesso: true,
         finalizado: true,
         protocolo: conv.protocolo,
         mensagens: ['Atendimento encerrado. Se precisar, mande uma nova mensagem que começamos de novo! 👋'],
         opcoes: []
       };
+      this.registrarHistorico(conv.id, 'saida', '', despedida.mensagens);
+      return despedida;
     }
 
     if (['menu', 'reiniciar', 'inicio', 'voltar'].includes(entrada) && conv.fluxoId) {
-      return this.iniciarConversa(telefone, conv.fluxoId, canal);
+      return this.iniciarConversa(telefone, conv.fluxoId, canal, nomeContato, jidOriginal);
     }
 
     // Resolver próximo
@@ -357,14 +467,44 @@ export class MemoryStore {
     if (noAtual.proximoId && opcoesDoNo.length === 0) {
       destId = noAtual.proximoId;
     } else {
-      const match = opcoesDoNo.find(o => o.palavraChave === entrada) ||
-                    opcoesDoNo.find(o => o.palavraChave.length > 2 && entrada.includes(o.palavraChave));
+      const entradaCorrigida = normalizarEntradaMunicipe(texto);
+
+      // 1. Busca exata e substring
+      let match = opcoesDoNo.find(o => o.palavraChave === entrada || o.palavraChave === entradaCorrigida) ||
+                  opcoesDoNo.find(o => o.palavraChave.length > 2 && (entrada.includes(o.palavraChave) || entradaCorrigida.includes(o.palavraChave)));
+
+      // 2. Se não encontrou, busca com tolerância ortográfica PT-BR (Fuzzy / Levenshtein)
+      if (!match) {
+        match = opcoesDoNo.find(o => verificarCorrespondenciaFuzzy(texto, o.palavraChave));
+      }
+
       if (match) destId = match.destinoId;
+    }
+
+    // Gatilho direto para atendente com tolerância ortográfica
+    if (
+      verificarCorrespondenciaFuzzy(texto, 'atendente') ||
+      verificarCorrespondenciaFuzzy(texto, 'humano') ||
+      verificarCorrespondenciaFuzzy(texto, 'suporte')
+    ) {
+      const opAtendente = opcoesDoNo.find(o => /atendente|humano/i.test(o.palavraChave));
+      destId = opAtendente ? opAtendente.destinoId : 8;
+    }
+
+    // Verificação inteligente de CPF para e-SUS PEC Piraí
+    const cpfDetectado = esusService.extrairCPF(texto);
+    if (cpfDetectado) {
+      const dados = await esusService.consultarCidadao(cpfDetectado);
+      if (dados) {
+        this.cidadaosPorTelefone.set(telefone, dados);
+        conv.nomeContato = dados.nomeCompleto;
+        destId = 7;
+      }
     }
 
     if (!destId) {
       const chaves = opcoesDoNo.map(o => o.palavraChave);
-      return {
+      const invalida: RespostaBot = {
         sucesso: false,
         entradaInvalida: true,
         protocolo: conv.protocolo,
@@ -373,14 +513,38 @@ export class MemoryStore {
         mensagens: [
           chaves.length > 0
             ? `Não entendi 🤔 Responda com uma das opções: ${chaves.join(', ')}.`
-            : 'Não entendi. Digite *menu* para voltar ao início.'
+            : 'Não entendi. Digite *menu* para voltar ao início ou *5* para atendente.'
         ]
       };
+      this.registrarHistorico(conv.id, 'saida', '', invalida.mensagens);
+      return invalida;
+    }
+
+    // Se o destino é o nó de Atendente Humano (nó 8), ativa a pausa automática do robô!
+    if (destId === 8) {
+      conv.emAtendimentoHumano = true;
     }
 
     conv.fluxoMensagemAtualId = destId;
     conv.dataUltimaInteracao = new Date().toISOString();
-    return this.percorrerPassos(conv, destId);
+    const resposta = this.percorrerPassos(conv, destId);
+    this.registrarHistorico(conv.id, 'saida', '', resposta.mensagens);
+    return resposta;
+  }
+
+  private formatarVariaveis(texto: string, conv: any): string {
+    const cid = this.cidadaosPorTelefone.get(conv.telefone);
+    return texto
+      .replace(/{{nome}}/g, cid?.nome || 'Munícipe')
+      .replace(/{{nomeCompleto}}/g, cid?.nomeCompleto || 'Munícipe')
+      .replace(/{{cpf}}/g, cid?.cpf || '—')
+      .replace(/{{cns}}/g, cid?.cns || '—')
+      .replace(/{{usf}}/g, cid?.usf || 'sua Unidade de Saúde (USF)')
+      .replace(/{{acs}}/g, cid?.acs || 'seu Agente Comunitário de Saúde')
+      .replace(/{{equipe}}/g, cid?.equipe || 'Equipe de Saúde da Família')
+      .replace(/{{telefoneUsf}}/g, cid?.telefoneUsf || '(24) 2411-9300')
+      .replace(/{{enderecoUsf}}/g, cid?.enderecoUsf || 'Piraí - RJ')
+      .replace(/{{protocolo}}/g, conv.protocolo || '—');
   }
 
   private percorrerPassos(conv: any, noId: number): RespostaBot {
@@ -398,8 +562,31 @@ export class MemoryStore {
       const no = this.nos.find(n => n.id === atualId);
       if (!no) break;
 
-      const texto = this.mensagens.get(no.mensagemId);
-      if (texto) mensagens.push(texto);
+      const texto = this.mensagens.get(no.mensagemId) || '';
+
+      // Detecta se este bloco é configurado para pausar o robô para atendimento humano
+      const ehPausaAtendente =
+        (no.titulo && /atendente|humano|pausar|\[atendente\]|\[pausar\]/i.test(no.titulo)) ||
+        (texto && /\[atendente\]|\[pausar\]|\{\{pausar\}\}|\{\{atendente\}\}/i.test(texto));
+
+      if (texto) {
+        let formatado = this.formatarVariaveis(texto, conv);
+        if (ehPausaAtendente) {
+          formatado = formatado
+            .replace(/\[ATENDENTE\]/gi, '')
+            .replace(/\[PAUSAR\]/gi, '')
+            .replace(/\{\{pausar\}\}/gi, '')
+            .replace(/\{\{atendente\}\}/gi, '')
+            .trim();
+        }
+        mensagens.push(formatado);
+      }
+
+      if (ehPausaAtendente) {
+        conv.emAtendimentoHumano = true;
+        conv.fluxoMensagemAtualId = atualId;
+        break; // Pausa o fluxo neste bloco para o atendente humano responder
+      }
 
       const opcs = this.opcoes.filter(o => o.noId === no.id);
       if (opcs.length > 0) {
@@ -424,8 +611,34 @@ export class MemoryStore {
       noAtualId: atualId,
       mensagens,
       opcoes,
-      finalizado
+      finalizado,
+      emAtendimentoHumano: conv.emAtendimentoHumano || false
     };
+  }
+
+  registrarHistorico(conversaId: number, direcao: 'entrada' | 'saida', conteudo: string, lote?: string[]) {
+    if (lote && lote.length > 0) {
+      for (const item of lote) {
+        this.historico.push({
+          id: ++nextId,
+          conversaId,
+          direcao,
+          conteudo: item,
+          data: new Date().toISOString()
+        });
+      }
+      return;
+    }
+
+    if (conteudo) {
+      this.historico.push({
+        id: ++nextId,
+        conversaId,
+        direcao,
+        conteudo,
+        data: new Date().toISOString()
+      });
+    }
   }
 
   obterPainelWhatsApp(porta: number) {
@@ -442,7 +655,8 @@ export class MemoryStore {
         fluxoNome: fluxo ? fluxo.nome : '—',
         passoAtual: msg,
         finalizada: c.finalizada,
-        totalMensagens: 2,
+        emAtendimentoHumano: c.emAtendimentoHumano || false,
+        totalMensagens: this.historico.filter(h => h.conversaId === c.id).length,
         dataUltimaInteracao: c.dataUltimaInteracao
       };
     });
@@ -483,11 +697,33 @@ export class MemoryStore {
         };
       });
     return {
+      id: c.id,
       protocolo: c.protocolo,
       telefone: c.telefone,
+      jidOriginal: c.jidOriginal,
       contato: c.nomeContato,
+      canal: c.canal,
+      emAtendimentoHumano: c.emAtendimentoHumano || false,
+      finalizada: c.finalizada,
       mensagens: msgs
     };
+  }
+
+  obterConversa(conversaId: number) {
+    return this.conversas.find(x => x.id === conversaId) || null;
+  }
+
+  obterConversaPorTelefoneOuJid(telefoneOuJid: string) {
+    const limpo = telefoneOuJid.split('@')[0];
+    return this.conversas.find(c => c.telefone === limpo || c.jidOriginal === telefoneOuJid || c.telefone === telefoneOuJid) || null;
+  }
+
+  alternarAtendimentoHumano(conversaId: number, emAtendimentoHumano: boolean): { sucesso: boolean; conversa?: any } {
+    const c = this.conversas.find(x => x.id === conversaId);
+    if (!c) return { sucesso: false };
+    c.emAtendimentoHumano = emAtendimentoHumano;
+    c.dataUltimaInteracao = new Date().toISOString();
+    return { sucesso: true, conversa: c };
   }
 
   encerrarConversa(conversaId: number): boolean {

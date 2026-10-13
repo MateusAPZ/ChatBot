@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Central de Testes Local · Chatbot WhatsApp</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0d0f13; color: #f3f4f6; }
+    .card { background-color: #11141a; border: 1px solid rgba(255, 255, 255, 0.07); }
+    .input-dark { background-color: #161a22; border: 1px solid rgba(255, 255, 255, 0.1); }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+  <div class="max-w-5xl mx-auto space-y-6">
+    <!-- CABEÇALHO -->
+    <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-6">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xl font-bold">🧪</span>
+          <div>
+            <h1 class="text-2xl font-bold text-white tracking-tight">Central de Testes Local</h1>
+            <p class="text-sm text-gray-400">Página autônoma de testes para validação rápida da API e do Chatbot.</p>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <a href="/" class="bg-emerald-500 hover:bg-emerald-400 text-gray-900 font-semibold text-xs px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/10">
+          Abrir Aplicação Completa
+        </a>
+        <a href="/simulador" class="bg-white/5 hover:bg-white/10 text-gray-300 font-medium text-xs px-4 py-2.5 rounded-xl border border-white/10 transition">
+          Simulador WhatsApp Web
+        </a>
+      </div>
+    </header>
+
+    <!-- CARDS DE STATUS -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="card rounded-2xl p-4 flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold">
+          ⚡
+        </div>
+        <div>
+          <p class="text-[10px] font-bold uppercase text-gray-500 tracking-wider">Status do Servidor</p>
+          <p id="serverStatus" class="text-sm font-semibold text-gray-300">Verificando...</p>
+        </div>
+      </div>
+
+      <div class="card rounded-2xl p-4 flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold">
+          💾
+        </div>
+        <div>
+          <p class="text-[10px] font-bold uppercase text-gray-500 tracking-wider">Armazenamento</p>
+          <p id="storageStatus" class="text-sm font-semibold text-gray-300">Verificando...</p>
+        </div>
+      </div>
+
+      <div class="card rounded-2xl p-4 flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold">
+          🔄
+        </div>
+        <div>
+          <p class="text-[10px] font-bold uppercase text-gray-500 tracking-wider">Fluxos Carregados</p>
+          <p id="flowsStatus" class="text-sm font-semibold text-gray-300">Verificando...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAINEL DE DISPARO RÁPIDO -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- ENTRADA -->
+      <div class="card rounded-2xl p-6 space-y-4">
+        <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          <span>📨</span> Disparo de Mensagem de Teste
+        </h2>
+        
+        <div>
+          <label class="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">Telefone Fictício</label>
+          <input type="text" id="telInput" value="5511999998888" class="input-dark w-full px-3.5 py-2.5 rounded-xl text-sm text-gray-200 focus:outline-none focus:border-emerald-500/50">
+        </div>
+
+        <div>
+          <label class="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">Atalhos de Fluxo</label>
+          <div class="flex flex-wrap gap-2">
+            <button onclick="setMsg('menu')" class="text-xs bg-[#161a22] hover:bg-emerald-500/10 hover:text-emerald-300 text-gray-300 border border-white/10 px-3 py-1.5 rounded-lg transition">👋 Início (menu)</button>
+            <button onclick="setMsg('1')" class="text-xs bg-[#161a22] hover:bg-emerald-500/10 hover:text-emerald-300 text-gray-300 border border-white/10 px-3 py-1.5 rounded-lg transition">🛠️ 1 - Suporte</button>
+            <button onclick="setMsg('2')" class="text-xs bg-[#161a22] hover:bg-emerald-500/10 hover:text-emerald-300 text-gray-300 border border-white/10 px-3 py-1.5 rounded-lg transition">💳 2 - Financeiro</button>
+            <button onclick="setMsg('sair')" class="text-xs bg-[#161a22] hover:bg-emerald-500/10 hover:text-emerald-300 text-gray-300 border border-white/10 px-3 py-1.5 rounded-lg transition">🚪 sair</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">Texto da Mensagem</label>
+          <div class="flex gap-2">
+            <input type="text" id="msgInput" value="Olá" placeholder="Digite uma opção..." class="input-dark flex-1 px-3.5 py-2.5 rounded-xl text-sm text-gray-200 focus:outline-none focus:border-emerald-500/50">
+            <button onclick="enviarMensagem()" id="btnEnviar" class="bg-emerald-500 hover:bg-emerald-400 text-gray-900 font-semibold px-5 py-2.5 rounded-xl text-sm transition">
+              Disparar
+            </button>
+          </div>
+        </div>
+
+        <div class="pt-2 border-t border-white/5 flex gap-2">
+          <button onclick="executarBateria()" class="w-full bg-[#161a22] hover:bg-[#1f2530] text-gray-300 font-medium py-2 rounded-xl text-xs border border-white/10 transition">
+            ▶️ Executar Diagnóstico de Todos os Endpoints
+          </button>
+        </div>
+      </div>
+
+      <!-- RESPOSTA -->
+      <div class="card rounded-2xl p-6 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+            <h2 class="text-base font-semibold text-white flex items-center gap-2">
+              <span>🤖</span> Retorno do Chatbot
+            </h2>
+            <span id="protocoloBadge" class="text-xs font-mono text-emerald-400"></span>
+          </div>
+
+          <div id="respostaArea" class="space-y-3">
+            <div class="text-center py-12 text-gray-500 text-xs">
+              Nenhuma mensagem disparada ainda. Clique em "Disparar" para testar.
+            </div>
+          </div>
+        </div>
+
+        <div id="statusFooter" class="mt-4 pt-3 border-t border-white/5 text-[11px] text-gray-500 flex justify-between">
+          <span>Pronto para testes</span>
+          <span>Porta: 5277</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOGS DE DIAGNÓSTICO -->
+    <div id="diagnosticPanel" class="card rounded-2xl p-6 hidden">
+      <h3 class="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+        <span>📋</span> Resultados do Diagnóstico
+      </h3>
+      <div id="diagnosticResults" class="space-y-2 text-xs font-mono"></div>
+    </div>
+  </div>
+
+  <script>
+    async function checarStatus() {
+      try {
+        const res = await fetch('/api/diagnostico');
+        const data = await res.json();
+        document.getElementById('serverStatus').innerHTML = '<span class="text-emerald-400 font-semibold">● Online (' + data.porta + ')</span>';
+        document.getElementById('storageStatus').innerText = data.armazenamento;
+        document.getElementById('flowsStatus').innerText = data.totalFluxos + ' ativo(s)';
+      } catch (e) {
+        document.getElementById('serverStatus').innerHTML = '<span class="text-rose-400 font-semibold">● Erro de Conexão</span>';
+      }
+    }
+
+    function setMsg(val) {
+      document.getElementById('msgInput').value = val;
+      enviarMensagem();
+    }
+
+    async function enviarMensagem() {
+      const telefone = document.getElementById('telInput').value;
+      const texto = document.getElementById('msgInput').value;
+      const btn = document.getElementById('btnEnviar');
+      
+      btn.disabled = true;
+      btn.innerText = 'Enviando...';
+
+      try {
+        const res = await fetch('/api/testes/webhook-simulado', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telefone, texto })
+        });
+        const data = await res.json();
+        
+        const area = document.getElementById('respostaArea');
+        area.innerHTML = '';
+
+        if (data.respostaBot && data.respostaBot.mensagens) {
+          data.respostaBot.mensagens.forEach(msg => {
+            const div = document.createElement('div');
+            div.className = 'bg-[#1f2c33] text-gray-100 p-3.5 rounded-xl text-xs whitespace-pre-wrap leading-relaxed shadow';
+            div.innerText = msg;
+            area.appendChild(div);
+          });
+
+          if (data.respostaBot.opcoes && data.respostaBot.opcoes.length > 0) {
+            const opDiv = document.createElement('div');
+            opDiv.className = 'pt-2 flex flex-wrap gap-1.5';
+            data.respostaBot.opcoes.forEach(op => {
+              const b = document.createElement('button');
+              b.className = 'text-[11px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 px-2.5 py-1 rounded-full transition';
+              b.innerText = op;
+              b.onclick = () => setMsg(op);
+              opDiv.appendChild(b);
+            });
+            area.appendChild(opDiv);
+          }
+
+          if (data.respostaBot.protocolo) {
+            document.getElementById('protocoloBadge').innerText = 'Protocolo: #' + data.respostaBot.protocolo;
+          }
+        }
+      } catch (err) {
+        alert('Erro ao disparar: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Disparar';
+      }
+    }
+
+    async function executarBateria() {
+      const panel = document.getElementById('diagnosticPanel');
+      const results = document.getElementById('diagnosticResults');
+      panel.classList.remove('hidden');
+      results.innerHTML = '<p class="text-gray-400">Executando chamadas...</p>';
+
+      const endpoints = [
+        { nome: 'Healthcheck', url: '/health' },
+        { nome: 'Diagnóstico', url: '/api/diagnostico' },
+        { nome: 'Listar Fluxos', url: '/api/fluxos' },
+        { nome: 'Simulador Fluxos', url: '/api/simulador/fluxos' },
+        { nome: 'Webhook Meta Check', url: '/api/whatsapp/meta' },
+        { nome: 'Painel WhatsApp', url: '/api/whatsapp/painel' }
+      ];
+
+      results.innerHTML = '';
+      for (const ep of endpoints) {
+        const t0 = performance.now();
+        try {
+          const r = await fetch(ep.url);
+          const t1 = Math.round(performance.now() - t0);
+          const ok = r.ok;
+          const div = document.createElement('div');
+          div.className = 'flex items-center justify-between p-2 rounded bg-black/20';
+          div.innerHTML = `<span>${ok ? '✅' : '❌'} <strong>${ep.nome}</strong> (${ep.url})</span> <span class="text-gray-400">${t1}ms</span>`;
+          results.appendChild(div);
+        } catch (e) {
+          const div = document.createElement('div');
+          div.className = 'p-2 rounded bg-black/20 text-rose-400';
+          div.innerHTML = `❌ <strong>${ep.nome}</strong>: ${e.message}`;
+          results.appendChild(div);
+        }
+      }
+    }
+
+    checarStatus();
+  </script>
+</body>
+</html>

@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
-  BadgeCheck, Cloud, PlugZap, Send, Copy, Eye, X, Loader2, Smartphone, MonitorPlay
+  BadgeCheck, Cloud, PlugZap, Send, Copy, Eye, X, Loader2, Smartphone, MonitorPlay,
+  QrCode, RefreshCw, CheckCircle2, Headphones, Bot, Pause
 } from 'lucide-react';
 import { apiService } from '../api/client';
 import { PainelWhatsAppDados, MensagemHistorico } from '../types';
 import { useToast } from '../context/ToastContext';
+import { CorretorOrtografico } from '../components/CorretorOrtografico';
 
 export const WhatsAppPanelPage: React.FC = () => {
   const [painel, setPainel] = useState<PainelWhatsAppDados | null>(null);
@@ -12,18 +14,35 @@ export const WhatsAppPanelPage: React.FC = () => {
   const [fluxoSelecionado, setFluxoSelecionado] = useState<number | ''>('');
   const [publicandoFluxo, setPublicandoFluxo] = useState(false);
 
+  // Conexão Baileys QR Code (Zero Custo)
+  const [tabConexao, setTabConexao] = useState<'qrcode' | 'oficial'>('qrcode');
+  const [baileysStatus, setBaileysStatus] = useState<{
+    status: 'desconectado' | 'gerando_qrcode' | 'aguardando_qrcode' | 'conectando' | 'conectado';
+    qrCodeDataUrl: string | null;
+    numeroConectado: string | null;
+    nomePerfil: string | null;
+    mensagemStatus: string;
+  } | null>(null);
+  const [acaoBaileysCarregando, setAcaoBaileysCarregando] = useState(false);
+
   // Formulário de teste
   const [telefoneTeste, setTelefoneTeste] = useState('');
   const [mensagemTeste, setMensagemTeste] = useState('Teste de conexão do chatbot ✅');
   const [enviandoTeste, setEnviandoTeste] = useState(false);
 
-  // Modal de histórico
+  // Modal de histórico & Atendimento Humano
   const [modalAberto, setModalAberto] = useState(false);
+  const [conversaAtivaId, setConversaAtivaId] = useState<number | null>(null);
   const [historicoCarregando, setHistoricoCarregando] = useState(false);
+  const [mensagemAtendente, setMensagemAtendente] = useState('');
+  const [enviandoMensagemAtendente, setEnviandoMensagemAtendente] = useState(false);
+  const [alternandoModoBot, setAlternandoModoBot] = useState(false);
   const [dadosHistorico, setDadosHistorico] = useState<{
+    id?: number;
     protocolo: string;
     telefone: string;
     contato: string | null;
+    emAtendimentoHumano?: boolean;
     mensagens: MensagemHistorico[];
   } | null>(null);
 
@@ -45,9 +64,58 @@ export const WhatsAppPanelPage: React.FC = () => {
     }
   };
 
+  const carregarBaileysStatus = async () => {
+    try {
+      const data = await apiService.getWhatsAppBaileysStatus();
+      setBaileysStatus(data);
+    } catch {
+      // Ignora erro inicial
+    }
+  };
+
+  const handleConectarBaileys = async () => {
+    setAcaoBaileysCarregando(true);
+    try {
+      const res = await apiService.conectarWhatsAppBaileys();
+      setBaileysStatus(res);
+      toast('Iniciando conexão e gerando QR Code...', 'sucesso');
+    } catch {
+      toast('Erro ao iniciar conexão com WhatsApp.', 'erro');
+    } finally {
+      setAcaoBaileysCarregando(false);
+    }
+  };
+
+  const handleDesconectarBaileys = async (limpar = false) => {
+    setAcaoBaileysCarregando(true);
+    try {
+      const res = await apiService.desconectarWhatsAppBaileys(limpar);
+      setBaileysStatus(res);
+      toast('WhatsApp desconectado.', 'sucesso');
+    } catch {
+      toast('Erro ao desconectar WhatsApp.', 'erro');
+    } finally {
+      setAcaoBaileysCarregando(false);
+    }
+  };
+
   useEffect(() => {
     carregarPainel();
+    carregarBaileysStatus();
   }, []);
+
+  // Polling automático enquanto estiver gerando ou aguardando QR Code
+  useEffect(() => {
+    if (!baileysStatus) return;
+    const precisaPolling = ['gerando_qrcode', 'aguardando_qrcode', 'conectando'].includes(baileysStatus.status);
+    if (!precisaPolling) return;
+
+    const interval = setInterval(() => {
+      carregarBaileysStatus();
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [baileysStatus?.status]);
 
   const copiarParaTransferencia = async (texto: string) => {
     try {
@@ -97,6 +165,8 @@ export const WhatsAppPanelPage: React.FC = () => {
   };
 
   const handleAbrirHistorico = async (conversaId: number) => {
+    setConversaAtivaId(conversaId);
+    setMensagemAtendente('');
     setModalAberto(true);
     setHistoricoCarregando(true);
     try {
@@ -107,6 +177,47 @@ export const WhatsAppPanelPage: React.FC = () => {
       setModalAberto(false);
     } finally {
       setHistoricoCarregando(false);
+    }
+  };
+
+  const handleAlternarModoAtendente = async (ligarBot: boolean) => {
+    if (!conversaAtivaId) return;
+    setAlternandoModoBot(true);
+    try {
+      // ligarBot = true -> emAtendimentoHumano = false (robô ativado)
+      // ligarBot = false -> emAtendimentoHumano = true (robô pausado)
+      const res = await apiService.alternarAtendimentoHumano(conversaAtivaId, !ligarBot);
+      toast(ligarBot ? 'Robô reativado! Ele voltou a responder automaticamente.' : 'Robô pausado. Modo atendente humano ativado!', 'sucesso');
+      setDadosHistorico(prev => prev ? { ...prev, emAtendimentoHumano: res.emAtendimentoHumano } : null);
+      await carregarPainel();
+    } catch {
+      toast('Erro ao alterar modo de atendimento.', 'erro');
+    } finally {
+      setAlternandoModoBot(false);
+    }
+  };
+
+  const handleEnviarMensagemAtendente = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!conversaAtivaId || !mensagemAtendente.trim()) return;
+    setEnviandoMensagemAtendente(true);
+    const texto = mensagemAtendente.trim();
+    try {
+      const res = await apiService.responderComoAtendente(conversaAtivaId, texto);
+      if (res.sucesso) {
+        toast('Mensagem enviada com sucesso!', 'sucesso');
+        setMensagemAtendente('');
+        // Recarrega histórico atualizado
+        const atualizado = await apiService.getWhatsAppHistorico(conversaAtivaId);
+        setDadosHistorico(atualizado);
+        await carregarPainel();
+      } else {
+        toast(`Erro no envio: ${res.erro || 'Falha ao entregar mensagem.'}`, 'erro');
+      }
+    } catch {
+      toast('Erro de comunicação ao enviar mensagem.', 'erro');
+    } finally {
+      setEnviandoMensagemAtendente(false);
     }
   };
 
@@ -176,22 +287,208 @@ export const WhatsAppPanelPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* COLUNA ESQUERDA: PASSO A PASSO DE CONFIGURAÇÃO */}
-        <div className="bg-[#11141a] border border-white/5 rounded-2xl p-5 space-y-5">
-          <div className="flex items-center gap-2 text-gray-300">
-            <PlugZap className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-sm font-semibold">Como ligar o bot no seu WhatsApp</h2>
-          </div>
+      {/* SELETOR DE MODO DE CONEXÃO */}
+      <div className="flex border-b border-white/10 gap-2">
+        <button
+          type="button"
+          onClick={() => setTabConexao('qrcode')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition ${
+            tabConexao === 'qrcode'
+              ? 'border-emerald-400 text-emerald-400 bg-emerald-500/5'
+              : 'border-transparent text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <QrCode className="w-4 h-4" /> WhatsApp Web QR Code (Zero Custo · Sem Taxas da Meta)
+        </button>
+        <button
+          type="button"
+          onClick={() => setTabConexao('oficial')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition ${
+            tabConexao === 'oficial'
+              ? 'border-emerald-400 text-emerald-400 bg-emerald-500/5'
+              : 'border-transparent text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <PlugZap className="w-4 h-4" /> Meta Cloud API / Twilio (APIs Pagas)
+        </button>
+      </div>
 
-          <ol className="space-y-4">
-            {/* Passo 1 */}
-            <li className="flex gap-3">
-              <span className="w-6 h-6 shrink-0 rounded-full bg-white/5 border border-white/10 text-[11px] font-bold flex items-center justify-center text-gray-400">
-                1
-              </span>
-              <div className="min-w-0 text-xs text-gray-400 leading-relaxed flex-1">
-                <p className="text-gray-200 font-medium mb-1">Escolha o fluxo que atende no WhatsApp</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {tabConexao === 'qrcode' ? (
+          /* COLUNA ESQUERDA: CONEXÃO NATIVA WHATSAPP WEB QR CODE */
+          <div className="bg-[#11141a] border border-white/5 rounded-2xl p-5 space-y-5">
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2 text-gray-200">
+                <QrCode className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h2 className="text-sm font-semibold text-white">Conexão Direta via QR Code</h2>
+                  <p className="text-[11px] text-gray-500">Zero taxas por mensagem: conecta o chip da Secretaria de Saúde de Piraí</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={carregarBaileysStatus}
+                className="p-1.5 rounded-lg border border-white/10 hover:bg-white/5 text-gray-400 hover:text-white transition"
+                title="Atualizar status"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* STATUS DA CONEXÃO */}
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#161a22] border border-white/5">
+              <div className="flex items-center gap-3">
+                <span className={`w-3 h-3 rounded-full ${
+                  baileysStatus?.status === 'conectado'
+                    ? 'bg-emerald-400 animate-pulse'
+                    : baileysStatus?.status === 'aguardando_qrcode'
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-gray-600'
+                }`} />
+                <div>
+                  <p className="text-xs font-semibold text-gray-200">
+                    {baileysStatus?.status === 'conectado' && `Conectado: ${baileysStatus.numeroConectado}`}
+                    {baileysStatus?.status === 'aguardando_qrcode' && 'Aguardando Leitura do QR Code'}
+                    {baileysStatus?.status === 'gerando_qrcode' && 'Gerando QR Code Seguro...'}
+                    {baileysStatus?.status === 'conectando' && 'Estabelecendo Conexão...'}
+                    {(!baileysStatus || baileysStatus?.status === 'desconectado') && 'WhatsApp Desconectado'}
+                  </p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    {baileysStatus?.mensagemStatus || 'Clique no botão abaixo para gerar o QR Code de conexão.'}
+                  </p>
+                </div>
+              </div>
+
+              {baileysStatus?.status === 'conectado' && (
+                <button
+                  type="button"
+                  onClick={() => handleDesconectarBaileys(false)}
+                  disabled={acaoBaileysCarregando}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition disabled:opacity-50"
+                >
+                  Desconectar
+                </button>
+              )}
+            </div>
+
+            {/* EXIBIÇÃO DO QR CODE */}
+            {baileysStatus?.status === 'aguardando_qrcode' && baileysStatus.qrCodeDataUrl && (
+              <div className="text-center p-4 bg-[#161a22] border border-emerald-500/20 rounded-2xl space-y-3">
+                <div className="inline-block bg-white p-3 rounded-2xl shadow-xl">
+                  <img
+                    src={baileysStatus.qrCodeDataUrl}
+                    alt="QR Code WhatsApp"
+                    className="w-56 h-56 mx-auto block"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-gray-200">Aponte o WhatsApp do celular para este QR Code</p>
+                  <p className="text-[11px] text-gray-400 mt-1 max-w-sm mx-auto">
+                    No WhatsApp do aparelho: Menu (3 pontinhos) &gt; Aparelhos conectados &gt; Conectar um aparelho.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleConectarBaileys}
+                  className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:underline pt-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Gerar novo QR Code
+                </button>
+              </div>
+            )}
+
+            {(!baileysStatus || baileysStatus.status === 'desconectado') && (
+              <div className="text-center py-6 px-4 bg-[#161a22] border border-white/5 rounded-2xl space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/20">
+                  <QrCode className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Conectar Celular da Saúde com Custo Zero</h3>
+                  <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">
+                    Sem taxas por mensagem e sem necessidade de cartão de crédito. As mensagens são processadas direto pelo servidor municipal de Piraí.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleConectarBaileys}
+                  disabled={acaoBaileysCarregando}
+                  className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-[#0d0f13] font-semibold text-xs px-5 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/10"
+                >
+                  {acaoBaileysCarregando ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando QR Code...
+                    </>
+                  ) : (
+                    <>
+                      <QrCode className="w-3.5 h-3.5" /> Gerar QR Code de Conexão
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {baileysStatus?.status === 'conectado' && (
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-2">
+                <div className="flex items-center gap-2 text-emerald-300 font-semibold text-xs">
+                  <CheckCircle2 className="w-4 h-4" /> WhatsApp Ativo e Respondendo Automaticamente
+                </div>
+                <p className="text-[11px] text-gray-300">
+                  Qualquer morador de Piraí que enviar mensagem para <strong>{baileysStatus.numeroConectado}</strong> será atendido pelo fluxo do PET-Saúde!
+                </p>
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDesconectarBaileys(true)}
+                    className="text-[11px] text-rose-400 hover:text-rose-300 hover:underline"
+                  >
+                    Limpar sessão do aparelho
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* FLUXO ATIVO NA CONEXÃO QR CODE */}
+            <div className="border-t border-white/5 pt-4">
+              <p className="text-gray-200 font-medium text-xs mb-1">Fluxo publicado para o WhatsApp</p>
+              <form onSubmit={handlePublicarFluxo} className="flex items-center gap-2 mt-2">
+                <select
+                  value={fluxoSelecionado}
+                  onChange={(e) => setFluxoSelecionado(Number(e.target.value))}
+                  className="flex-1 bg-[#161a22] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-emerald-500/50"
+                >
+                  {painel.fluxos.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.nome} {f.status ? '' : '(inativo)'}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={publicandoFluxo}
+                  className="text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-[#0d0f13] transition disabled:opacity-50"
+                >
+                  Publicar
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : (
+          /* COLUNA ESQUERDA: PASSO A PASSO META / TWILIO */
+          <div className="bg-[#11141a] border border-white/5 rounded-2xl p-5 space-y-5">
+            <div className="flex items-center gap-2 text-gray-300">
+              <PlugZap className="w-4 h-4 text-emerald-400" />
+              <h2 className="text-sm font-semibold">Como ligar o bot no seu WhatsApp</h2>
+            </div>
+
+            <ol className="space-y-4">
+              {/* Passo 1 */}
+              <li className="flex gap-3">
+                <span className="w-6 h-6 shrink-0 rounded-full bg-white/5 border border-white/10 text-[11px] font-bold flex items-center justify-center text-gray-400">
+                  1
+                </span>
+                <div className="min-w-0 text-xs text-gray-400 leading-relaxed flex-1">
+                  <p className="text-gray-200 font-medium mb-1">Escolha o fluxo que atende no WhatsApp</p>
                 <form onSubmit={handlePublicarFluxo} className="flex items-center gap-2 mt-2">
                   <select
                     value={fluxoSelecionado}
@@ -324,8 +621,9 @@ export const WhatsAppPanelPage: React.FC = () => {
             </li>
           </ol>
         </div>
+      )}
 
-        {/* COLUNA DIREITA: TESTE E CONVERSAS RECENTES */}
+      {/* COLUNA DIREITA: TESTE E CONVERSAS RECENTES */}
         <div className="space-y-6">
           {/* Formulário de Teste */}
           <div className="bg-[#11141a] border border-white/5 rounded-2xl p-5">
@@ -422,21 +720,28 @@ export const WhatsAppPanelPage: React.FC = () => {
                         </p>
                       </div>
 
-                      <span
-                        className={`shrink-0 text-[10px] px-2 py-1 rounded-md ${
-                          conversa.finalizada
-                            ? 'bg-white/5 text-gray-500'
-                            : 'bg-emerald-500/10 text-emerald-300'
-                        }`}
-                      >
-                        {conversa.finalizada ? 'encerrada' : 'ativa'}
-                      </span>
+                      {conversa.emAtendimentoHumano ? (
+                        <span className="shrink-0 text-[10px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/25 flex items-center gap-1 font-semibold">
+                          <Headphones className="w-3 h-3 text-amber-400" />
+                          Com atendente
+                        </span>
+                      ) : (
+                        <span
+                          className={`shrink-0 text-[10px] px-2 py-1 rounded-md ${
+                            conversa.finalizada
+                              ? 'bg-white/5 text-gray-500'
+                              : 'bg-emerald-500/10 text-emerald-300'
+                          }`}
+                        >
+                          {conversa.finalizada ? 'encerrada' : 'robô ativo'}
+                        </span>
+                      )}
 
                       <button
                         type="button"
                         onClick={() => handleAbrirHistorico(conversa.id)}
                         className="shrink-0 p-1.5 rounded-md text-gray-600 hover:text-gray-200 hover:bg-white/5 transition"
-                        title="Ver histórico"
+                        title="Ver histórico e atender"
                       >
                         <Eye className="w-3.5 h-3.5" />
                       </button>
@@ -449,29 +754,82 @@ export const WhatsAppPanelPage: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL DE HISTÓRICO */}
+      {/* MODAL DE HISTÓRICO & ATENDIMENTO HUMANO */}
       {modalAberto && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="bg-[#11141a] border border-white/10 rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
-            <div className="h-14 shrink-0 px-5 flex items-center justify-between border-b border-white/5">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-white truncate">
-                  {dadosHistorico?.contato || dadosHistorico?.telefone || 'Histórico'}
-                </p>
-                <p className="text-[11px] text-gray-500 truncate">
-                  Protocolo {dadosHistorico?.protocolo}
-                </p>
+          <div className="bg-[#11141a] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            {/* CABEÇALHO DO MODAL */}
+            <div className="h-16 shrink-0 px-5 flex items-center justify-between border-b border-white/5 gap-3">
+              <div className="min-w-0 flex items-center gap-3">
+                <span className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                  dadosHistorico?.emAtendimentoHumano ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                }`}>
+                  {dadosHistorico?.emAtendimentoHumano ? <Headphones className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate flex items-center gap-2">
+                    {dadosHistorico?.contato || dadosHistorico?.telefone || 'Histórico'}
+                    <span className="text-[11px] text-gray-500 font-normal">({dadosHistorico?.telefone})</span>
+                  </p>
+                  <p className="text-[11px] text-gray-500 truncate">
+                    Protocolo #{dadosHistorico?.protocolo}
+                  </p>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setModalAberto(false)}
-                className="text-gray-600 hover:text-gray-200 transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {/* BOTÃO LIGAR / PAUSAR ROBÔ */}
+                {dadosHistorico?.emAtendimentoHumano ? (
+                  <button
+                    type="button"
+                    onClick={() => handleAlternarModoAtendente(true)}
+                    disabled={alternandoModoBot}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition"
+                    title="Reativar respostas automáticas do bot"
+                  >
+                    {alternandoModoBot ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
+                    Ligar Robô Novamente 🤖
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleAlternarModoAtendente(false)}
+                    disabled={alternandoModoBot}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-semibold transition"
+                    title="Pausar o bot para falar diretamente com o cidadão"
+                  >
+                    {alternandoModoBot ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />}
+                    Pausar Robô (Assumir) 👨‍💻
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setModalAberto(false)}
+                  className="text-gray-500 hover:text-gray-200 p-1.5 rounded-lg hover:bg-white/5 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-2 chat-wallpaper">
+            {/* BANNER INFORMATIVO SE ROBÔ ESTIVER PAUSADO */}
+            {dadosHistorico?.emAtendimentoHumano && (
+              <div className="bg-amber-500/10 border-b border-amber-500/20 px-5 py-2.5 flex items-center justify-between text-xs text-amber-300">
+                <div className="flex items-center gap-2">
+                  <Headphones className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Robô Pausado para este munícipe:</strong> o bot não responderá nada automaticamente.
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">
+                  Modo Humano Ativo
+                </span>
+              </div>
+            )}
+
+            {/* ÁREA DE MENSAGENS */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-2 chat-wallpaper min-h-[300px]">
               {historicoCarregando ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-6 h-6 text-emerald-400 animate-spin" />
@@ -486,7 +844,7 @@ export const WhatsAppPanelPage: React.FC = () => {
                           isEntrada
                             ? 'balao-usuario bg-[#005c4b] text-gray-50'
                             : 'balao-bot bg-[#202c33] text-gray-100'
-                        } text-sm px-3.5 py-2 max-w-[75%]`}
+                        } text-sm px-3.5 py-2 max-w-[80%] rounded-xl shadow`}
                       >
                         <div className="leading-relaxed break-words whitespace-pre-wrap">{m.conteudo}</div>
                         <div className="text-[10px] opacity-50 text-right mt-1">{m.data}</div>
@@ -497,6 +855,40 @@ export const WhatsAppPanelPage: React.FC = () => {
               ) : (
                 <p className="text-xs text-gray-600 text-center py-8">Sem mensagens registradas.</p>
               )}
+            </div>
+
+            {/* BARRA DE RESPOSTA DO ATENDENTE */}
+            <div className="p-3 border-t border-white/10 bg-[#161a22] space-y-2">
+              {mensagemAtendente.trim().length > 0 && (
+                <CorretorOrtografico
+                  texto={mensagemAtendente}
+                  onAplicarCorrecao={(textoCorrigido) => {
+                    setMensagemAtendente(textoCorrigido);
+                    toast('Texto corrigido conforme as normas da língua portuguesa! ✨', 'sucesso');
+                  }}
+                  compacto={false}
+                />
+              )}
+              <form onSubmit={handleEnviarMensagemAtendente} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  spellCheck={true}
+                  lang="pt-BR"
+                  placeholder={dadosHistorico?.emAtendimentoHumano ? "Digite sua mensagem como atendente humano..." : "Digite aqui (ao enviar, o robô é pausado automaticamente)..."}
+                  value={mensagemAtendente}
+                  onChange={(e) => setMensagemAtendente(e.target.value)}
+                  disabled={enviandoMensagemAtendente}
+                  className="flex-1 bg-[#11141a] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-gray-100 placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                />
+                <button
+                  type="submit"
+                  disabled={enviandoMensagemAtendente || !mensagemAtendente.trim()}
+                  className="inline-flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-[#0d0f13] text-xs font-semibold px-4 py-2.5 rounded-xl transition shrink-0"
+                >
+                  {enviandoMensagemAtendente ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  Responder
+                </button>
+              </form>
             </div>
           </div>
         </div>

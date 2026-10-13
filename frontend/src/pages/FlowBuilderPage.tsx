@@ -2,11 +2,13 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft, GitBranch, LayoutGrid, Play, Smartphone, MessageSquare, ListTree,
-  Flag, FlagOff, Plus, Minus, Crosshair, X, Trash2, Loader2
+  Flag, FlagOff, Plus, Minus, Crosshair, X, Trash2, Loader2, Headphones, LogOut
 } from 'lucide-react';
 import { apiService } from '../api/client';
 import { FluxoBuilderViewModel, NoBuilder } from '../types';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
+import { CorretorOrtografico } from '../components/CorretorOrtografico';
 
 const LARGURA_NO = 256;
 const COLUNA = 340;
@@ -16,6 +18,7 @@ export const FlowBuilderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const fluxoId = parseInt(id || '0', 10);
   const { toast } = useToast();
+  const { user, logout } = useAuth();
 
   const [fluxo, setFluxo] = useState<FluxoBuilderViewModel | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -115,8 +118,16 @@ export const FlowBuilderPage: React.FC = () => {
     }
   };
 
+  // Helper para identificar se o nó pausa para atendente
+  const ehAtendente = useCallback((no: NoBuilder | null | undefined) => {
+    if (!no) return false;
+    return /atendente|humano|pausar|\[atendente\]|\[pausar\]|\{\{pausar\}\}|\{\{atendente\}\}/i.test(
+      (no.titulo || '') + ' ' + (no.conteudo || '')
+    );
+  }, []);
+
   // Adicionar novo bloco
-  const handleAdicionarBloco = async (tipo: 'mensagem' | 'menu') => {
+  const handleAdicionarBloco = async (tipo: 'mensagem' | 'menu' | 'atendente') => {
     if (!fluxo) return;
 
     // Calcular posição livre
@@ -140,17 +151,61 @@ export const FlowBuilderPage: React.FC = () => {
 
     const conteudo = tipo === 'menu'
       ? 'Escolha uma opção:\n\n1 - Falar com atendente\n2 - Encerrar'
+      : tipo === 'atendente'
+      ? 'Aguarde um momento, vou transferir você para um atendente humano da nossa equipe... [ATENDENTE]'
       : 'Digite aqui a mensagem do bot.';
-    const titulo = tipo === 'menu' ? 'Menu' : 'Mensagem';
+    const titulo = tipo === 'menu' ? 'Menu' : tipo === 'atendente' ? 'Chamar Atendente' : 'Mensagem';
 
     setSalvandoStatus('salvando');
     try {
       const res = await apiService.criarNo(fluxo.id, { conteudo, posX, posY, titulo });
       setFluxo(res.fluxo);
       setSelecionadoId(res.noId);
-      toast('Bloco criado. Edite o texto ao lado.', 'sucesso');
+      toast(tipo === 'atendente' ? 'Bloco de atendente criado!' : 'Bloco criado. Edite o texto ao lado.', 'sucesso');
     } catch {
       toast('Erro ao criar bloco.', 'erro');
+    } finally {
+      setSalvandoStatus('salvo');
+    }
+  };
+
+  // Alternar se o bloco selecionado é de Atendente Humano (pausa o robô)
+  const handleAlternarAtendente = async () => {
+    if (!noSelecionado || !fluxo) return;
+    const jaEh = ehAtendente(noSelecionado);
+    let novoConteudo = editorConteudo;
+    let novoTitulo = editorTitulo;
+
+    if (jaEh) {
+      novoConteudo = novoConteudo
+        .replace(/\[ATENDENTE\]|\[PAUSAR\]|\{\{pausar\}\}|\{\{atendente\}\}/gi, '')
+        .trim();
+      if (/atendente|humano/i.test(novoTitulo)) {
+        novoTitulo = 'Mensagem';
+      }
+      toast('Pausa para atendente desativada neste bloco.', 'info');
+    } else {
+      if (!/\[ATENDENTE\]/i.test(novoConteudo)) {
+        novoConteudo = (novoConteudo.trim() + '\n\n[ATENDENTE]').trim();
+      }
+      if (!novoTitulo || novoTitulo === 'Mensagem' || novoTitulo.startsWith('Passo #')) {
+        novoTitulo = 'Chamar Atendente';
+      }
+      toast('Este bloco agora pausará o robô e chamará um atendente humano! 👨‍💻', 'sucesso');
+    }
+
+    setEditorConteudo(novoConteudo);
+    setEditorTitulo(novoTitulo);
+    setSalvandoStatus('salvando');
+    try {
+      const atualizado = await apiService.atualizarNo(noSelecionado.id, {
+        conteudo: novoConteudo,
+        titulo: novoTitulo,
+        fluxoId: fluxo.id
+      });
+      if (atualizado) setFluxo(atualizado);
+    } catch {
+      toast('Erro ao atualizar bloco.', 'erro');
     } finally {
       setSalvandoStatus('salvo');
     }
@@ -533,6 +588,7 @@ export const FlowBuilderPage: React.FC = () => {
 
   // Estilo visual por tipo de nó
   const getEstiloDoTipo = (no: NoBuilder) => {
+    if (ehAtendente(no)) return { cor: 'text-amber-400', fundo: 'bg-amber-500/10', borda: 'border-amber-500/30', icone: Headphones, rotulo: 'Atendente' };
     if (no.ehInicio) return { cor: 'text-emerald-400', fundo: 'bg-emerald-500/10', borda: 'border-emerald-500/20', icone: Flag, rotulo: 'Início' };
     if (no.opcoes.length > 0) return { cor: 'text-amber-400', fundo: 'bg-amber-500/10', borda: 'border-amber-500/20', icone: ListTree, rotulo: 'Menu' };
     if (no.proximoId) return { cor: 'text-sky-400', fundo: 'bg-sky-500/10', borda: 'border-sky-500/20', icone: MessageSquare, rotulo: 'Mensagem' };
@@ -604,6 +660,18 @@ export const FlowBuilderPage: React.FC = () => {
           >
             <Play className="w-3.5 h-3.5" /> Testar bot
           </Link>
+
+          {user && (
+            <button
+              type="button"
+              onClick={logout}
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-white/10 hover:border-rose-500/30 hover:bg-rose-500/10 text-gray-400 hover:text-rose-400 transition"
+              title={`Sair do sistema (${user.nome})`}
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -640,6 +708,20 @@ export const FlowBuilderPage: React.FC = () => {
                   <span className="text-[10px] text-gray-500 block">Pergunta e ramifica</span>
                 </span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => handleAdicionarBloco('atendente')}
+                className="w-full text-left flex items-center gap-3 p-2.5 bg-[#161a22] hover:bg-[#1b202a] border border-amber-500/20 hover:border-amber-500/40 rounded-xl transition group"
+              >
+                <span className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition">
+                  <Headphones className="w-4 h-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="text-xs font-medium block text-amber-300">👨‍💻 Atendente</span>
+                  <span className="text-[10px] text-gray-500 block">Pausa o bot p/ humano</span>
+                </span>
+              </button>
             </div>
           </div>
 
@@ -648,7 +730,7 @@ export const FlowBuilderPage: React.FC = () => {
             <ul className="space-y-2 text-[11px] text-gray-500 px-1">
               <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Bloco de início</li>
               <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> Caminho automático</li>
-              <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Caminho por opção</li>
+              <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Atendente (pausa o robô)</li>
               <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Fim da conversa</li>
             </ul>
           </div>
@@ -783,6 +865,12 @@ export const FlowBuilderPage: React.FC = () => {
 
                     {/* Conteúdo */}
                     <div className="p-2.5 space-y-2">
+                      {ehAtendente(no) && (
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-500/10 border border-amber-500/30 rounded-md text-[10px] font-semibold text-amber-300">
+                          <Headphones className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span>Pausa o robô para atendente</span>
+                        </div>
+                      )}
                       <div className="text-[11px] leading-relaxed text-gray-300 bg-[#0f1218] border border-white/5 rounded-lg p-2 whitespace-pre-wrap break-words max-h-24 overflow-hidden">
                         {no.conteudo || <span className="text-gray-600">(sem texto)</span>}
                       </div>
@@ -923,6 +1011,8 @@ export const FlowBuilderPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
+                    spellCheck={true}
+                    lang="pt-BR"
                     value={editorTitulo}
                     onChange={(e) => setEditorTitulo(e.target.value)}
                     onBlur={handleSalvarTexto}
@@ -934,20 +1024,34 @@ export const FlowBuilderPage: React.FC = () => {
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                      Mensagem enviada
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-600 flex items-center gap-1.5">
+                      <span>Mensagem enviada</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-semibold lowercase">pt-br</span>
                     </label>
                     <span className="text-[10px] text-gray-600">*negrito* _itálico_</span>
                   </div>
                   <textarea
                     rows={6}
+                    spellCheck={true}
+                    lang="pt-BR"
                     value={editorConteudo}
                     onChange={(e) => setEditorConteudo(e.target.value)}
                     onBlur={handleSalvarTexto}
                     placeholder="Digite o texto que o bot vai enviar..."
                     className="w-full bg-[#161a22] border border-white/10 rounded-lg p-3 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 resize-none leading-relaxed"
                   />
-                  <div className="flex items-center justify-between mt-1.5">
+
+                  {/* Assistente e Corretor Ortográfico PT-BR */}
+                  <CorretorOrtografico
+                    texto={editorConteudo}
+                    onAplicarCorrecao={(textoCorrigido) => {
+                      setEditorConteudo(textoCorrigido);
+                      toast('Texto corrigido conforme as normas da língua portuguesa! ✨', 'sucesso');
+                    }}
+                    className="mt-2"
+                  />
+
+                  <div className="flex items-center justify-between mt-2">
                     <span className="text-[10px] text-gray-600">Salva ao sair do campo</span>
                     <button
                       type="button"
@@ -956,6 +1060,44 @@ export const FlowBuilderPage: React.FC = () => {
                     >
                       Salvar agora
                     </button>
+                  </div>
+                </div>
+
+                {/* Pausar fluxo para Atendente Humano */}
+                <div className={`p-3 rounded-xl border transition ${
+                  ehAtendente(noSelecionado)
+                    ? 'bg-amber-500/10 border-amber-500/30'
+                    : 'bg-[#161a22] border-white/5 hover:border-white/10'
+                }`}>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <Headphones className={`w-4 h-4 ${ehAtendente(noSelecionado) ? 'text-amber-400' : 'text-gray-400'}`} />
+                      <span className="text-xs font-semibold text-gray-200">
+                        Pausar para Atendente Humano
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAlternarAtendente}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        ehAtendente(noSelecionado) ? 'bg-amber-500' : 'bg-white/20'
+                      }`}
+                      title={ehAtendente(noSelecionado) ? 'Desativar pausa para atendente' : 'Ativar pausa para atendente'}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          ehAtendente(noSelecionado) ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                    {ehAtendente(noSelecionado)
+                      ? '✅ Quando a conversa chegar aqui, o robô envia o texto e para de responder até um atendente intervir no painel ou digitar #bot.'
+                      : 'Ative para que o robô pare de responder neste passo e passe a conversa para um atendente humano.'}
+                  </p>
+                  <div className="mt-2 text-[10px] text-gray-500 bg-black/25 px-2 py-1.5 rounded border border-white/5">
+                    💡 <span className="text-gray-300">Você também pode só escrever</span> <code className="text-amber-300 font-bold bg-amber-500/10 px-1 py-0.5 rounded">[ATENDENTE]</code> <span className="text-gray-300">no texto da mensagem.</span>
                   </div>
                 </div>
 

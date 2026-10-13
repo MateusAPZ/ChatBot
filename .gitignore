@@ -386,3 +386,7 @@ lerna-debug.log*
 .DS_Store
 Thumbs.db
 .vscode/
+
+# WhatsApp Baileys session credentials
+auth_baileys/
+backend/auth_baileys/

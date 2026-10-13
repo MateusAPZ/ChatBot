@@ -1,6 +1,7 @@
 import { pool, isDbConnected } from '../config/db';
 import { Fluxo, FluxoBuilderViewModel, NoBuilder, RespostaBot } from '../types';
 import { memoryStore } from './MemoryStore';
+import { verificarCorrespondenciaFuzzy, normalizarEntradaMunicipe } from '../utils/ptBrSpellCorrector';
 
 const LIMITE_MENSAGENS_POR_PASSO = 10;
 const COMANDOS_REINICIO = ['menu', 'reiniciar', 'recomecar', 'recomeçar', 'inicio', 'início', 'voltar'];
@@ -527,9 +528,9 @@ export class ChatbotService {
     return res.rows[0]?.Id || null;
   }
 
-  async iniciarConversa(telefone: string, fluxoId: number, canal: string, nomeContato?: string): Promise<RespostaBot> {
+  async iniciarConversa(telefone: string, fluxoId: number, canal: string, nomeContato?: string, jidOriginal?: string): Promise<RespostaBot> {
     if (!isDbConnected) {
-      return memoryStore.iniciarConversa(telefone, fluxoId, canal);
+      return memoryStore.iniciarConversa(telefone, fluxoId, canal, nomeContato, jidOriginal);
     }
     const noInicialId = await this.obterNoInicial(fluxoId);
     if (!noInicialId) {
@@ -586,19 +587,46 @@ export class ChatbotService {
     return resposta;
   }
 
-  async processarMensagem(telefone: string, texto: string, canal: string, nomeContato?: string): Promise<RespostaBot> {
+  async processarMensagem(telefone: string, texto: string, canal: string, nomeContato?: string, jidOriginal?: string): Promise<RespostaBot> {
     if (!isDbConnected) {
-      return memoryStore.processarMensagem(telefone, texto, canal);
+      return memoryStore.processarMensagem(telefone, texto, canal, nomeContato, jidOriginal);
     }
     const tel = telefone.trim();
     const entrada = normalizar(texto);
 
     const convRes = await pool.query(
-      'SELECT "Id", "Protocolo", "FluxoId", "FluxoMensagemAtualId", "Finalizada", "NomeContato" FROM "Conversas" WHERE "TelefoneUsuario" = $1 AND "Canal" = $2',
+      'SELECT "Id", "Protocolo", "FluxoId", "FluxoMensagemAtualId", "Finalizada", "NomeContato", COALESCE("EmAtendimentoHumano", false) as "EmAtendimentoHumano" FROM "Conversas" WHERE "TelefoneUsuario" = $1 AND "Canal" = $2',
       [tel, canal]
     );
 
     let conversa = convRes.rows[0];
+
+    // Se estiver sob atendimento humano, o robô fica em silêncio absoluto
+    if (conversa && !conversa.Finalizada && conversa.EmAtendimentoHumano) {
+      if (entrada === '#bot' || entrada === 'ligar bot' || entrada === '/bot') {
+        await pool.query('UPDATE "Conversas" SET "EmAtendimentoHumano" = false, "DataUltimaInteracao" = NOW() WHERE "Id" = $1', [conversa.Id]);
+        const retornoBot: RespostaBot = {
+          sucesso: true,
+          mensagens: ['🤖 Robô de autoatendimento reativado! Como posso ajudar você agora?'],
+          opcoes: [],
+          protocolo: conversa.Protocolo,
+          emAtendimentoHumano: false
+        };
+        await this.registrarHistorico(conversa.Id, 'entrada', texto);
+        await this.registrarHistorico(conversa.Id, 'saida', '', retornoBot.mensagens);
+        return retornoBot;
+      }
+
+      // Registra a mensagem do usuário no histórico para o atendente ver no painel
+      await this.registrarHistorico(conversa.Id, 'entrada', texto);
+      return {
+        sucesso: true,
+        mensagens: [], // robô em silêncio
+        opcoes: [],
+        protocolo: conversa.Protocolo,
+        emAtendimentoHumano: true
+      };
+    }
 
     // Sem conversa ou já finalizada: inicia no fluxo padrão
     if (!conversa || conversa.Finalizada || !conversa.FluxoMensagemAtualId) {
@@ -702,14 +730,24 @@ export class ChatbotService {
       return sequencialDestino;
     }
 
-    // Caso Menu: busca casamento exato e substring
+    // Caso Menu: busca casamento exato, substring e tolerância ortográfica PT-BR
     const busca = normalizar(textoDigitado);
+    const entradaCorrigida = normalizarEntradaMunicipe(textoDigitado);
+
+    // 1. Busca exata e substring
     for (const op of opcoesRes.rows) {
-      if (op.PalavraChave === busca) return op.ProximaFluxoMensagemId;
+      if (op.PalavraChave === busca || op.PalavraChave === entradaCorrigida) return op.ProximaFluxoMensagemId;
     }
 
     for (const op of opcoesRes.rows) {
-      if (op.PalavraChave.length > 2 && busca.includes(op.PalavraChave)) {
+      if (op.PalavraChave.length > 2 && (busca.includes(op.PalavraChave) || entradaCorrigida.includes(op.PalavraChave))) {
+        return op.ProximaFluxoMensagemId;
+      }
+    }
+
+    // 2. Tolerância ortográfica PT-BR (Fuzzy / Levenshtein)
+    for (const op of opcoesRes.rows) {
+      if (verificarCorrespondenciaFuzzy(textoDigitado, op.PalavraChave)) {
         return op.ProximaFluxoMensagemId;
       }
     }
@@ -734,7 +772,7 @@ export class ChatbotService {
       visitados.add(atualId);
 
       const noRes: any = await pool.query(`
-        SELECT fm."Id", fm."ProximaFluxoMensagemId", m."Conteudo"
+        SELECT fm."Id", fm."ProximaFluxoMensagemId", m."Conteudo", m."Titulo"
         FROM "FluxoMensagens" fm
         JOIN "Mensagens" m ON m."Id" = fm."MensagemId"
         WHERE fm."Id" = $1
@@ -743,10 +781,28 @@ export class ChatbotService {
       if (noRes.rowCount === 0) break;
       const no: any = noRes.rows[0];
 
-      if (no.Conteudo && no.Conteudo.trim()) {
-        resposta.mensagens.push(no.Conteudo);
+      // Verificação se este nó transfere para atendente humano ou pausa o fluxo
+      const ehAtendente = /atendente|humano|pausar|\[atendente\]|\[pausar\]|\{\{pausar\}\}|\{\{atendente\}\}/i.test(
+        (no.Titulo || '') + ' ' + (no.Conteudo || '')
+      );
+
+      let msgLimpa = (no.Conteudo || '')
+        .replace(/\[ATENDENTE\]|\[PAUSAR\]|\{\{pausar\}\}|\{\{atendente\}\}/gi, '')
+        .trim();
+
+      if (msgLimpa) {
+        resposta.mensagens.push(msgLimpa);
       }
       resposta.noAtualId = no.Id;
+
+      if (ehAtendente) {
+        // Pausar o fluxo e passar para atendimento humano
+        resposta.emAtendimentoHumano = true;
+        try {
+          await pool.query('UPDATE "Conversas" SET "EmAtendimentoHumano" = true, "DataUltimaInteracao" = NOW() WHERE "Id" = $1', [conversaId]);
+        } catch {}
+        break; // Interrompe para não avançar mais nenhum nó
+      }
 
       // Menu
       const opRes = await pool.query('SELECT "PalavraChave" FROM "Respostas" WHERE "FluxoMensagemAtualId" = $1 ORDER BY "Id" ASC', [no.Id]);
@@ -779,7 +835,7 @@ export class ChatbotService {
     return resposta;
   }
 
-  private async registrarHistorico(conversaId: number, direcao: 'entrada' | 'saida', conteudo: string, respostasDoBot?: string[]) {
+  async registrarHistorico(conversaId: number, direcao: 'entrada' | 'saida', conteudo: string, respostasDoBot?: string[]) {
     if (!conversaId) return;
     const client = await pool.connect();
     try {
@@ -801,6 +857,40 @@ export class ChatbotService {
       }
     } finally {
       client.release();
+    }
+  }
+
+  async alternarAtendimentoHumano(conversaId: number, emAtendimentoHumano: boolean): Promise<boolean> {
+    if (!isDbConnected) {
+      return memoryStore.alternarAtendimentoHumano(conversaId, emAtendimentoHumano).sucesso;
+    }
+    const res = await pool.query(
+      'UPDATE "Conversas" SET "EmAtendimentoHumano" = $1, "DataUltimaInteracao" = NOW() WHERE "Id" = $2',
+      [emAtendimentoHumano, conversaId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async obterConversa(conversaId: number): Promise<any | null> {
+    if (!isDbConnected) {
+      return memoryStore.obterConversa(conversaId);
+    }
+    const res = await pool.query('SELECT * FROM "Conversas" WHERE "Id" = $1', [conversaId]);
+    return res.rows[0] || null;
+  }
+
+  async registrarMensagemAtendente(telefoneOuJid: string, texto: string): Promise<void> {
+    if (!isDbConnected) {
+      const conv = memoryStore.obterConversaPorTelefoneOuJid(telefoneOuJid);
+      if (conv) {
+        memoryStore.registrarHistorico(conv.id, 'saida', texto);
+      }
+      return;
+    }
+    const tel = telefoneOuJid.split('@')[0];
+    const res = await pool.query('SELECT "Id" FROM "Conversas" WHERE "TelefoneUsuario" = $1 ORDER BY "Id" DESC LIMIT 1', [tel]);
+    if (res.rowCount && res.rowCount > 0) {
+      await this.registrarHistorico(res.rows[0].Id, 'saida', texto);
     }
   }
 }

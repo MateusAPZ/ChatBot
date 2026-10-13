@@ -52,6 +52,7 @@ export interface ConversaResumo {
   fluxoNome: string;
   passoAtual: string;
   finalizada: boolean;
+  emAtendimentoHumano?: boolean;
   totalMensagens: number;
   dataUltimaInteracao: string;
 }
@@ -80,4 +81,20 @@ export interface PainelWhatsAppDados {
   conversasAtivas: number;
   mensagensTrocadas: number;
   conversas: ConversaResumo[];
+}
+
+export interface Usuario {
+  id: number;
+  usuario: string;
+  nome: string;
+  email: string;
+  perfil: 'admin' | 'atendente';
+  cargo: string;
+}
+
+export interface RespostaLogin {
+  sucesso: boolean;
+  token?: string;
+  usuario?: Usuario;
+  erro?: string;
 }

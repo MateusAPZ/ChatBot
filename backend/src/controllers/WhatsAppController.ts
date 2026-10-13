@@ -3,6 +3,8 @@ import { pool, isDbConnected } from '../config/db';
 import { config } from '../config/env';
 import { metaWhatsAppService } from '../services/MetaWhatsAppService';
 import { twilioWhatsAppService } from '../services/TwilioWhatsAppService';
+import { baileysWhatsAppService } from '../services/BaileysWhatsAppService';
+import { chatbotService } from '../services/ChatbotService';
 import { memoryStore } from '../services/MemoryStore';
 
 function mascarar(valor?: string | null): string {
@@ -135,7 +137,7 @@ export class WhatsAppController {
         return res.json({ sucesso: true, ...hist });
       }
 
-      const convRes = await pool.query('SELECT "Protocolo" as protocolo, "TelefoneUsuario" as telefone, "NomeContato" as contato FROM "Conversas" WHERE "Id" = $1', [conversaId]);
+      const convRes = await pool.query('SELECT "Protocolo" as protocolo, "TelefoneUsuario" as telefone, "NomeContato" as contato, COALESCE("EmAtendimentoHumano", false) as "emAtendimentoHumano" FROM "Conversas" WHERE "Id" = $1', [conversaId]);
       if (convRes.rowCount === 0) {
         return res.status(404).json({ sucesso: false, erro: 'Conversa não encontrada.' });
       }
@@ -161,9 +163,111 @@ export class WhatsAppController {
         protocolo: c.protocolo,
         telefone: c.telefone,
         contato: c.contato,
+        emAtendimentoHumano: c.emAtendimentoHumano,
         mensagens: msgs
       });
     } catch (err: any) {
+      return res.status(500).json({ sucesso: false, erro: err.message });
+    }
+  }
+
+  async alternarAtendimento(req: Request, res: Response) {
+    try {
+      const conversaId = parseInt(String(req.params.id), 10);
+      const { emAtendimentoHumano, avisarCidadao } = req.body;
+
+      let conv: any = null;
+      if (!isDbConnected) {
+        const alt = memoryStore.alternarAtendimentoHumano(conversaId, Boolean(emAtendimentoHumano));
+        conv = alt.conversa;
+      } else {
+        await pool.query(
+          'UPDATE "Conversas" SET "EmAtendimentoHumano" = $1, "DataUltimaInteracao" = NOW() WHERE "Id" = $2',
+          [Boolean(emAtendimentoHumano), conversaId]
+        );
+        const cRes = await pool.query('SELECT * FROM "Conversas" WHERE "Id" = $1', [conversaId]);
+        conv = cRes.rows[0];
+      }
+
+      if (!conv) {
+        return res.status(404).json({ sucesso: false, erro: 'Conversa não encontrada.' });
+      }
+
+      // Se o atendente religou o robô e avisarCidadao não for falso, envia aviso pelo WhatsApp
+      if (!emAtendimentoHumano && avisarCidadao !== false) {
+        const msgAviso = '🤖 *Atendimento Humano Finalizado*\n\nO assistente virtual do PET-Saúde de Piraí foi reativado. Como podemos te ajudar? Digite *menu* a qualquer momento para ver as opções.';
+        const destino = conv.jidOriginal || conv.telefone || conv.TelefoneUsuario;
+        if (baileysWhatsAppService.estaConectado) {
+          await baileysWhatsAppService.enviarMensagem(destino, msgAviso);
+        }
+        await chatbotService.registrarMensagemAtendente(destino, msgAviso);
+      }
+
+      return res.json({
+        sucesso: true,
+        emAtendimentoHumano: Boolean(emAtendimentoHumano),
+        mensagem: emAtendimentoHumano ? 'Robô pausado. Atendimento humano ativado.' : 'Robô reativado com sucesso.'
+      });
+    } catch (err: any) {
+      console.error('Erro ao alternar atendimento:', err);
+      return res.status(500).json({ sucesso: false, erro: err.message });
+    }
+  }
+
+  async responderComoAtendente(req: Request, res: Response) {
+    try {
+      const conversaId = parseInt(String(req.params.id), 10);
+      const { mensagem } = req.body;
+      const texto = (mensagem || '').toString().trim();
+
+      if (!texto) {
+        return res.status(400).json({ sucesso: false, erro: 'Mensagem não pode ser vazia.' });
+      }
+
+      let conv: any = null;
+      if (!isDbConnected) {
+        conv = memoryStore.obterConversa(conversaId);
+        if (conv) {
+          conv.emAtendimentoHumano = true; // Garante que o robô continue pausado enquanto o atendente conversa
+          memoryStore.registrarHistorico(conversaId, 'saida', texto);
+        }
+      } else {
+        const cRes = await pool.query('SELECT * FROM "Conversas" WHERE "Id" = $1', [conversaId]);
+        conv = cRes.rows[0];
+        if (conv) {
+          await pool.query('UPDATE "Conversas" SET "EmAtendimentoHumano" = true, "DataUltimaInteracao" = NOW() WHERE "Id" = $1', [conversaId]);
+          await chatbotService.registrarHistorico(conversaId, 'saida', texto);
+        }
+      }
+
+      if (!conv) {
+        return res.status(404).json({ sucesso: false, erro: 'Conversa não encontrada.' });
+      }
+
+      const destino = conv.jidOriginal || conv.telefone || conv.TelefoneUsuario;
+      let envioOk = true;
+      let erroEnvio: string | undefined;
+
+      if (baileysWhatsAppService.estaConectado) {
+        const resEnvio = await baileysWhatsAppService.enviarMensagem(destino, texto);
+        envioOk = resEnvio.sucesso;
+        erroEnvio = resEnvio.erro;
+      } else {
+        const usaMeta = config.whatsapp.provedor.toLowerCase() === 'meta';
+        const service = usaMeta ? metaWhatsAppService : twilioWhatsAppService;
+        const resEnvio = await service.enviarMensagem(destino, texto);
+        envioOk = resEnvio.sucesso;
+        erroEnvio = resEnvio.erro;
+      }
+
+      return res.json({
+        sucesso: envioOk,
+        erro: erroEnvio,
+        mensagem: texto,
+        emAtendimentoHumano: true
+      });
+    } catch (err: any) {
+      console.error('Erro ao responder como atendente:', err);
       return res.status(500).json({ sucesso: false, erro: err.message });
     }
   }

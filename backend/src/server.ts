@@ -2,11 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { config } from './config/env';
-import { testConnection } from './config/db';
+import { testConnection, isDbConnected } from './config/db';
 import { fluxoController } from './controllers/FluxoController';
 import { simuladorController } from './controllers/SimuladorController';
 import { whatsAppController } from './controllers/WhatsAppController';
 import { webhookController } from './controllers/WebhookController';
+import { authController } from './controllers/AuthController';
+import { chatbotService } from './services/ChatbotService';
+import { esusService, UNIDADES_SAUDE_PIRAI } from './services/EsusService';
+import { baileysWhatsAppService } from './services/BaileysWhatsAppService';
 
 const app = express();
 
@@ -33,6 +37,25 @@ app.use(async (_req, _res, next) => {
 
 // Router central com todas as rotas da API
 const router = express.Router();
+
+// 0. Autenticação & Sessão Administrativa (PET-Saúde / Prefeitura de Piraí)
+router.post('/auth/login', (req, res) => authController.login(req, res));
+router.post('/auth/logout', (req, res) => authController.logout(req, res));
+router.get('/auth/me', (req, res) => authController.me(req, res));
+
+// Middleware de proteção para rotas administrativas internas
+const autenticar = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  return authController.middleware(req, res, next);
+};
+
+// Rotas protegidas (exigem cabeçalho Authorization: Bearer <token>)
+router.use('/fluxos', autenticar);
+router.use('/simulador', autenticar);
+router.use('/esus', autenticar);
+router.use('/whatsapp/painel', autenticar);
+router.use('/whatsapp/teste', autenticar);
+router.use('/whatsapp/conversas', autenticar);
+router.use('/whatsapp/baileys', autenticar);
 
 // 1. Fluxos
 router.get('/fluxos', (req, res) => fluxoController.listar(req, res));
@@ -65,6 +88,8 @@ router.get('/whatsapp/painel', (req, res) => whatsAppController.obterPainel(req,
 router.post('/whatsapp/teste', (req, res) => whatsAppController.enviarTeste(req, res));
 router.get('/whatsapp/conversas/:id/historico', (req, res) => whatsAppController.obterHistorico(req, res));
 router.post('/whatsapp/conversas/:id/encerrar', (req, res) => whatsAppController.encerrarConversa(req, res));
+router.post('/whatsapp/conversas/:id/alternar-atendimento', (req, res) => whatsAppController.alternarAtendimento(req, res));
+router.post('/whatsapp/conversas/:id/responder-atendente', (req, res) => whatsAppController.responderComoAtendente(req, res));
 
 // 4. Webhooks (Meta & Twilio)
 router.get('/whatsapp/meta', (req, res) => webhookController.metaVerificar(req, res));
@@ -74,18 +99,107 @@ router.get('/whatsapp/webhook', (req, res) => webhookController.twilioStatus(req
 router.post('/whatsapp/webhook', (req, res) => webhookController.twilioReceber(req, res));
 router.post('/whatsapp/status', (req, res) => webhookController.twilioStatusEntrega(req, res));
 
-// Healthcheck
+// Healthcheck & Diagnóstico de Testes
 router.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+router.get('/diagnostico', async (_req, res) => {
+  try {
+    const fluxos = await chatbotService.listarFluxos();
+    return res.json({
+      sucesso: true,
+      status: 'online',
+      armazenamento: isDbConnected ? 'PostgreSQL' : 'Memória Local (MemoryStore)',
+      isDbConnected,
+      totalFluxos: fluxos.length,
+      provedor: config.whatsapp.provedor,
+      porta: config.port,
+      uptimeSegundos: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
+    });
+  } catch (err: any) {
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
 
-// Registra o router tanto em /api quanto na raiz para compatibilidade total com Vercel
+// Endpoint auxiliar para testes de webhook simulado direto da interface
+router.post('/testes/webhook-simulado', async (req, res) => {
+  try {
+    const { telefone, texto, nome } = req.body;
+    const tel = (telefone || '5511999999999').toString().trim();
+    const txt = (texto || 'Olá').toString().trim();
+    const resposta = await chatbotService.processarMensagem(tel, txt, 'simulador', nome || 'Cliente Teste');
+    return res.json({
+      sucesso: true,
+      entrada: { telefone: tel, texto: txt, nome: nome || 'Cliente Teste' },
+      respostaBot: resposta
+    });
+  } catch (err: any) {
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+// 6. Integração e-SUS APS PEC (Piraí)
+router.post('/esus/consultar', async (req, res) => {
+  try {
+    const { termo, cpf } = req.body;
+    const busca = (termo || cpf || '').toString().trim();
+    if (!busca) {
+      return res.status(400).json({ sucesso: false, erro: 'Informe o CPF ou CNS para consulta.' });
+    }
+    const dados = await esusService.consultarCidadao(busca);
+    return res.json({
+      sucesso: true,
+      valido: esusService.validarCPF(busca),
+      cidadao: dados
+    });
+  } catch (err: any) {
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+router.get('/esus/unidades', (_req, res) => {
+  return res.json({ sucesso: true, unidades: UNIDADES_SAUDE_PIRAI });
+});
+
+// 7. WhatsApp Web Nativo (Baileys / Zero Custo via QR Code)
+router.get('/whatsapp/baileys/status', (_req, res) => {
+  return res.json({ sucesso: true, ...baileysWhatsAppService.obterStatus() });
+});
+
+router.post('/whatsapp/baileys/conectar', async (_req, res) => {
+  try {
+    const status = await baileysWhatsAppService.iniciarConexao();
+    return res.json({ sucesso: true, ...status });
+  } catch (err: any) {
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+router.post('/whatsapp/baileys/desconectar', async (req, res) => {
+  try {
+    const limpar = req.body?.limparSessao === true;
+    const status = await baileysWhatsAppService.desconectar(limpar);
+    return res.json({ sucesso: true, ...status });
+  } catch (err: any) {
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+// 1. Registra todas as rotas da API em /api
 app.use('/api', router);
-app.use('/', router);
 
-// Servir frontend se estiver compilado (modo servidor tradicional)
+// Compatibilidade para webhooks externos sem prefixo /api (caso configurado assim em provedores)
+app.post('/whatsapp/meta', (req, res) => webhookController.metaReceber(req, res));
+app.get('/whatsapp/meta', (req, res) => webhookController.metaVerificar(req, res));
+app.post('/whatsapp/webhook', (req, res) => webhookController.twilioReceber(req, res));
+app.post('/whatsapp/status', (req, res) => webhookController.twilioStatusEntrega(req, res));
+
+// 2. Servir frontend compilado (React SPA)
 const frontendDist = path.join(__dirname, '../../frontend/dist');
 app.use(express.static(frontendDist));
+
+// 3. Fallback SPA: qualquer rota de página (/fluxos, /fluxos/1, /fluxo/1, /whatsapp, /simulador) entrega index.html
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/whatsapp')) return next();
+  if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(frontendDist, 'index.html'), (err) => {
     if (err) next();
   });
@@ -101,6 +215,9 @@ if (!process.env.VERCEL) {
       console.log(`🚀 Servidor backend rodando com sucesso em http://localhost:${config.port}`);
       console.log(`📱 Webhook Meta disponível em: http://localhost:${config.port}/api/whatsapp/meta`);
       console.log(`📱 Webhook Twilio disponível em: http://localhost:${config.port}/api/whatsapp/webhook`);
+
+      // Auto-reconectar WhatsApp Baileys caso já existam credenciais salvas em auth_baileys
+      baileysWhatsAppService.autoConectarSeCredenciaisExistirem();
     });
   }).catch((err) => {
     console.error('Erro ao inicializar o servidor:', err);
