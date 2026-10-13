@@ -184,8 +184,9 @@ router.post('/whatsapp/baileys/desconectar', async (req, res) => {
   }
 });
 
-// 1. Registra todas as rotas da API em /api
+// 1. Registra todas as rotas da API em /api e diretamente na raiz (compatibilidade Vercel Serverless)
 app.use('/api', router);
+app.use(router);
 
 // Compatibilidade para webhooks externos sem prefixo /api (caso configurado assim em provedores)
 app.post('/whatsapp/meta', (req, res) => webhookController.metaReceber(req, res));
@@ -193,17 +194,19 @@ app.get('/whatsapp/meta', (req, res) => webhookController.metaVerificar(req, res
 app.post('/whatsapp/webhook', (req, res) => webhookController.twilioReceber(req, res));
 app.post('/whatsapp/status', (req, res) => webhookController.twilioStatusEntrega(req, res));
 
-// 2. Servir frontend compilado (React SPA)
-const frontendDist = path.join(__dirname, '../../frontend/dist');
-app.use(express.static(frontendDist));
+// 2. Servir frontend compilado apenas no Node local (no Vercel o Edge CDN serve frontend/dist automaticamente)
+if (!process.env.VERCEL) {
+  const frontendDist = path.join(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDist));
 
-// 3. Fallback SPA: qualquer rota de página (/fluxos, /fluxos/1, /fluxo/1, /whatsapp, /simulador) entrega index.html
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
-  res.sendFile(path.join(frontendDist, 'index.html'), (err) => {
-    if (err) next();
+  // Fallback SPA: qualquer rota de página (/fluxos, /fluxos/1, /fluxo/1, /whatsapp, /simulador) entrega index.html
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(frontendDist, 'index.html'), (err) => {
+      if (err) next();
+    });
   });
-});
+}
 
 export { app };
 export default app;

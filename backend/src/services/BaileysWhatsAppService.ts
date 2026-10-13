@@ -1,13 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import QRCode from 'qrcode';
-import pino from 'pino';
-import makeWASocket, {
-  DisconnectReason,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  WASocket
-} from '@whiskeysockets/baileys';
+import type { WASocket } from '@whiskeysockets/baileys';
 import { chatbotService } from './ChatbotService';
 
 export type StatusConexaoWhatsApp =
@@ -138,6 +131,17 @@ export class BaileysWhatsAppService {
       if (!fs.existsSync(this.authDir)) {
         fs.mkdirSync(this.authDir, { recursive: true });
       }
+
+      const {
+        default: makeWASocket,
+        DisconnectReason,
+        useMultiFileAuthState,
+        fetchLatestBaileysVersion
+      } = await import('@whiskeysockets/baileys');
+      const pinoModule: any = await import('pino');
+      const pino = pinoModule.default || pinoModule;
+      const qrcodeModule: any = await import('qrcode');
+      const QRCode = qrcodeModule.default || qrcodeModule;
 
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
       const { version } = await fetchLatestBaileysVersion();
