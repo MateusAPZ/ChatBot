@@ -59,7 +59,9 @@ export class BaileysWhatsAppService {
   private inicializando = false;
 
   constructor() {
-    this.authDir = path.join(__dirname, '../../auth_baileys');
+    this.authDir = process.env.VERCEL
+      ? path.join('/tmp', 'auth_baileys')
+      : path.join(__dirname, '../../auth_baileys');
   }
 
   get estaConectado(): boolean {
@@ -67,6 +69,17 @@ export class BaileysWhatsAppService {
   }
 
   obterStatus(): InfoStatusBaileys {
+    if (process.env.VERCEL) {
+      return {
+        status: 'desconectado',
+        qrCodeDataUrl: null,
+        numeroConectado: null,
+        nomePerfil: null,
+        ultimaAtualizacao: new Date().toISOString(),
+        mensagemStatus: 'WhatsApp Baileys Web requer servidor contínuo (local ou VPS). No Vercel, o WhatsApp opera via Meta Cloud API.'
+      };
+    }
+
     return {
       status: this.status,
       qrCodeDataUrl: this.qrCodeDataUrl,
@@ -78,6 +91,8 @@ export class BaileysWhatsAppService {
   }
 
   async autoConectarSeCredenciaisExistirem(): Promise<void> {
+    if (process.env.VERCEL) return;
+
     const credsPath = path.join(this.authDir, 'creds.json');
     if (fs.existsSync(credsPath) && !this.estaConectado && !this.inicializando) {
       console.log('🔄 [WhatsApp Baileys] Credenciais salvas encontradas em auth_baileys. Conectando automaticamente...');
@@ -90,6 +105,10 @@ export class BaileysWhatsAppService {
   }
 
   async iniciarConexao(): Promise<InfoStatusBaileys> {
+    if (process.env.VERCEL) {
+      return this.obterStatus();
+    }
+
     if (this.estaConectado) {
       return this.obterStatus();
     }

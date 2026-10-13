@@ -16,11 +16,14 @@
     "frontend"
   ],
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "axios": "^1.7.9",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "pg": "^8.13.1",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4",
     "twilio": "^5.4.1"
   },
   "devDependencies": {
