@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   BadgeCheck, Cloud, PlugZap, Send, Copy, Eye, X, Loader2, Smartphone, MonitorPlay,
-  QrCode, RefreshCw, CheckCircle2, Headphones, Bot, Pause
+  QrCode, RefreshCw, CheckCircle2, Headphones, Bot, Pause, AlertTriangle
 } from 'lucide-react';
 import { apiService } from '../api/client';
 import { PainelWhatsAppDados, MensagemHistorico } from '../types';
@@ -78,7 +78,11 @@ export const WhatsAppPanelPage: React.FC = () => {
     try {
       const res = await apiService.conectarWhatsAppBaileys();
       setBaileysStatus(res);
-      toast('Iniciando conexão e gerando QR Code...', 'sucesso');
+      if (res.mensagemStatus && (res.mensagemStatus.includes('Vercel') || res.mensagemStatus.includes('servidor contínuo'))) {
+        toast(res.mensagemStatus, 'info');
+      } else {
+        toast('Iniciando conexão e gerando QR Code...', 'sucesso');
+      }
     } catch {
       toast('Erro ao iniciar conexão com WhatsApp.', 'erro');
     } finally {
@@ -335,6 +339,23 @@ export const WhatsAppPanelPage: React.FC = () => {
                 <RefreshCw className="w-4 h-4" />
               </button>
             </div>
+
+            {/* AVISO QUANDO HOSPEDADO NO VERCEL (SERVERLESS) */}
+            {baileysStatus?.mensagemStatus?.includes('Vercel') && (
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2">
+                <div className="flex items-center gap-2 text-amber-300 font-semibold text-xs">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  Por que o QR Code não conecta no Vercel?
+                </div>
+                <p className="text-[11px] text-gray-300 leading-relaxed">
+                  A hospedagem no <strong>Vercel é Serverless</strong> (as funções pausam após alguns segundos sem requisições). A conexão direta por QR Code (WhatsApp Web) exige um processo Node.js rodando 24 horas por dia para manter o WebSocket ativo com o WhatsApp.
+                </p>
+                <div className="pt-1.5 text-[11px] text-gray-400 space-y-1.5 border-t border-white/5">
+                  <p>💡 <strong>Para usar QR Code com chip normal (Custo Zero):</strong> Execute o projeto no seu computador localmente com <code>npm run dev</code> ou hospede em um servidor contínuo (Render, Railway, VPS ou servidor da Prefeitura).</p>
+                  <p>⚡ <strong>Para usar na nuvem Vercel:</strong> Clique na aba ao lado <strong>Meta Cloud API / Twilio</strong>. A API oficial funciona 100% no Vercel via Webhook e oferece até 1.000 conversas gratuitas por mês pela Meta!</p>
+                </div>
+              </div>
+            )}
 
             {/* STATUS DA CONEXÃO */}
             <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#161a22] border border-white/5">
